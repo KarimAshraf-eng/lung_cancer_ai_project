@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 🔴 تطبيق الانتقال الناعم (Smooth Transition) على كامل الموقع 🔴 */
+body {
+  @apply bg-[#f8fafc] text-slate-800 transition-colors duration-300 ease-in-out dark:bg-slate-950 dark:text-slate-100;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom Scrollbar for a premium look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 dark:bg-slate-700 transition-colors;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400 dark:bg-slate-600;
+}
