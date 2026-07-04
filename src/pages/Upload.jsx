@@ -10,8 +10,6 @@ import {
     ChevronRight,
     X,
     Loader2,
-    Hash,
-    RefreshCw,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -168,140 +166,6 @@ const initialHistoryData = {
     family_history: '',
 };
 
-// ════════════════════════════════════════════════════════════════════
-// 🔴🔴🔴 جديد: Modal لجلب بيانات مريض موجود بالـ ID
-// ════════════════════════════════════════════════════════════════════
-const FetchPatientModal = memo(function FetchPatientModal({
-    isOpen,
-    onClose,
-    onFetchSuccess,
-}) {
-    const [tagInput, setTagInput] = useState('');
-    const [isFetching, setIsFetching] = useState(false);
-
-    useEffect(() => {
-        if (!isOpen) {
-            setTagInput('');
-            setIsFetching(false);
-        }
-    }, [isOpen]);
-
-    const handleFetch = async () => {
-        const tag = tagInput.trim();
-        if (!tag) {
-            toast.error('Please enter a Patient ID / Tag.');
-            return;
-        }
-
-        setIsFetching(true);
-        try {
-            const res = await api.get(`/patients/by-tag/${encodeURIComponent(tag)}`);
-            const p = res.data;
-
-            onFetchSuccess({
-                tag,
-                patient: p,
-            });
-
-            toast.success(`Patient data loaded: ${p.name}`);
-            onClose();
-        } catch (err) {
-            if (err.response?.status === 404) {
-                toast.error(`No patient found with ID "${tag}". Please check the ID and try again.`);
-            } else {
-                toast.error(err.response?.data?.detail || 'Error fetching patient data.');
-            }
-        } finally {
-            setIsFetching(false);
-        }
-    };
-
-    const handleKeyDown = (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            handleFetch();
-        }
-    };
-
-    if (!isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in bg-slate-900/60 backdrop-blur-sm">
-            <div className="relative bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-800 overflow-hidden animate-fade-in-up">
-                <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-slate-800">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center">
-                            <Search size={20} className="text-blue-600 dark:text-blue-400" />
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-extrabold text-slate-800 dark:text-white">Fetch Existing Patient</h3>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">Enter the patient ID to load their data</p>
-                        </div>
-                    </div>
-                    <button
-                        onClick={onClose}
-                        disabled={isFetching}
-                        className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
-                    >
-                        <X size={20} />
-                    </button>
-                </div>
-
-                <div className="p-6 space-y-4">
-                    <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-slate-600 dark:text-slate-300">
-                            Patient ID / Tag <span className="text-rose-500">*</span>
-                        </label>
-                        <div className="relative">
-                            <Hash size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                            <input
-                                type="text"
-                                autoFocus
-                                value={tagInput}
-                                onChange={(e) => setTagInput(e.target.value)}
-                                onKeyDown={handleKeyDown}
-                                placeholder="e.g. HOSP-2024-58392"
-                                disabled={isFetching}
-                                className="w-full pl-10 pr-4 py-3 rounded-xl border outline-none transition-all duration-200 text-sm bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 border-slate-200 dark:border-slate-700 focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 hover:border-slate-300 dark:hover:border-slate-600 disabled:opacity-60"
-                            />
-                        </div>
-                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-                            💡 The ID looks like <span className="font-mono font-semibold">HOSP-YYYY-NNNNN</span>.
-                        </p>
-                    </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-3 p-6 pt-0 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
-                    <button
-                        onClick={onClose}
-                        disabled={isFetching}
-                        className="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        onClick={handleFetch}
-                        disabled={isFetching || !tagInput.trim()}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {isFetching ? (
-                            <>
-                                <Loader2 size={16} className="animate-spin" />
-                                Fetching...
-                            </>
-                        ) : (
-                            <>
-                                <Search size={16} />
-                                Fetch Patient
-                            </>
-                        )}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-});
-
 // ─── Main Component ────────────────────────────────────────────────
 
 export default function Upload() {
@@ -315,37 +179,9 @@ export default function Upload() {
     const [patientData, setPatientData] = useState(initialPatientData);
     const [historyData, setHistoryData] = useState(initialHistoryData);
     const [files, setFiles] = useState([]);
-
-    const [isFetchModalOpen, setIsFetchModalOpen] = useState(false);
-
-    // 🔴🔴🔴 حالة جديدة: هل بنجلب ID معاينة من الـ backend؟
-    const [isLoadingTag, setIsLoadingTag] = useState(true);
+    const [isFetchingPatient, setIsFetchingPatient] = useState(false);
 
     const fileInputRef = useRef(null);
-
-    // ════════════════════════════════════════════════════════════════════
-    // 🔴🔴🔴 جديد: لما الصفحة تفتح، اطلب ID معاينة من الـ backend
-    // ════════════════════════════════════════════════════════════════════
-    const fetchPreviewTag = useCallback(async () => {
-        setIsLoadingTag(true);
-        try {
-            const res = await api.get('/scans/generate-tag-preview');
-            const tag = res.data?.tag;
-            if (tag) {
-                setPatientData((prev) => ({ ...prev, patient_tag: tag }));
-            }
-        } catch (err) {
-            console.error('Failed to generate preview tag:', err);
-            // مش نظهر toast error هنا عشان مش نـ irritate المستخدم
-            // الحقل هيفضل فاضي والـ backend هيتولّد واحد عند الـ submit (fallback)
-        } finally {
-            setIsLoadingTag(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchPreviewTag();
-    }, [fetchPreviewTag]);
 
     const handlePatientChange = useCallback((e) => {
         setPatientData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -359,51 +195,61 @@ export default function Upload() {
         }));
     }, []);
 
-    // 🔴🔴🔴 لما الـ fetch ينجح، نستبدل الـ tag المعروض بـ tag المريض الموجود
-    const handleFetchSuccess = useCallback((data) => {
-        const { tag, patient: p } = data;
+    const fetchPatientData = useCallback(async () => {
+        const tag = patientData.patient_tag?.trim();
+        if (!tag) {
+            toast.error('Please enter a Patient ID / Tag first.');
+            return;
+        }
 
-        setPatientData({
-            patient_name: p.name || '',
-            patient_age: p.age?.toString() || '',
-            patient_gender: p.gender || 'Male',
-            patient_tag: tag,
-        });
+        setIsFetchingPatient(true);
+        try {
+            const res = await api.get(`/patients/by-tag/${encodeURIComponent(tag)}`);
+            const p = res.data;
 
-        setHistoryData({
-            has_previous_tumors: !!p.has_previous_tumors,
-            prev_tumors_details: p.prev_tumors_details || '',
-            occupational_exposure: !!p.occupational_exposure,
-            occ_exposure_details: p.occ_exposure_details || '',
-            chest_pain_complaint: !!p.chest_pain_complaint,
-            chest_pain_details: p.chest_pain_details || '',
-            chronic_cough: !!p.chronic_cough,
-            chronic_cough_details: p.chronic_cough_details || '',
-            coughing_blood: !!p.coughing_blood,
-            coughing_blood_details: p.coughing_blood_details || '',
-            weight_loss: !!p.weight_loss,
-            weight_loss_details: p.weight_loss_details || '',
-            is_smoker: !!p.is_smoker,
-            pack_years: p.pack_years?.toString() || '',
-            smoking_cessation_date: p.smoking_cessation_date || '',
-            has_previous_chest_diseases: !!(p.previous_chest_diseases && p.previous_chest_diseases.trim()),
-            previous_chest_diseases: p.previous_chest_diseases || '',
-            has_family_history: !!(p.family_history && p.family_history.trim()),
-            family_history: p.family_history || '',
-        });
-    }, []);
+            setPatientData((prev) => ({
+                ...prev,
+                patient_name: p.name || '',
+                patient_age: p.age?.toString() || '',
+                patient_gender: p.gender || 'Male',
+            }));
 
-    // 🔴🔴🔴 لما الدكتور يضغط على زرار الـ Refresh — نجلب ID معاينة جديد
-    const handleRefreshTag = useCallback(() => {
-        // امسح كل البيانات (لأن الـ ID الجديد لمريض جديد)
-        setPatientData((prev) => ({
-            ...initialPatientData,
-            patient_tag: '',  // هنفضيه لحد ما الـ request يخلص
-        }));
-        setHistoryData(initialHistoryData);
-        // اطلب ID جديد
-        fetchPreviewTag();
-    }, [fetchPreviewTag]);
+            setHistoryData({
+                has_previous_tumors: !!p.has_previous_tumors,
+                prev_tumors_details: p.prev_tumors_details || '',
+                occupational_exposure: !!p.occupational_exposure,
+                occ_exposure_details: p.occ_exposure_details || '',
+                chest_pain_complaint: !!p.chest_pain_complaint,
+                chest_pain_details: p.chest_pain_details || '',
+                chronic_cough: !!p.chronic_cough,
+                chronic_cough_details: p.chronic_cough_details || '',
+                coughing_blood: !!p.coughing_blood,
+                coughing_blood_details: p.coughing_blood_details || '',
+                weight_loss: !!p.weight_loss,
+                weight_loss_details: p.weight_loss_details || '',
+                is_smoker: !!p.is_smoker,
+                pack_years: p.pack_years?.toString() || '',
+                smoking_cessation_date: p.smoking_cessation_date || '',
+                has_previous_chest_diseases: !!(p.previous_chest_diseases && p.previous_chest_diseases.trim()),
+                previous_chest_diseases: p.previous_chest_diseases || '',
+                has_family_history: !!(p.family_history && p.family_history.trim()),
+                family_history: p.family_history || '',
+            });
+
+            toast.success('Patient data loaded successfully!');
+        } catch (err) {
+            if (err.response?.status === 404) {
+                toast('Patient not found. You can register a new patient.', {
+                    icon: 'ℹ️',
+                    duration: 4000,
+                });
+            } else {
+                toast.error(err.response?.data?.detail || 'Error fetching patient data.');
+            }
+        } finally {
+            setIsFetchingPatient(false);
+        }
+    }, [patientData.patient_tag]);
 
     const handleFileChange = useCallback((e) => {
         const selected = Array.from(e.target.files || []);
@@ -460,7 +306,6 @@ export default function Upload() {
         });
     }, []);
 
-    // 🔴🔴🔴 لما نعمل reset، نطلب ID معاينة جديد
     const resetForm = useCallback(() => {
         setPatientData(initialPatientData);
         setHistoryData(initialHistoryData);
@@ -468,9 +313,7 @@ export default function Upload() {
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
-        // اطلب ID معاينة جديد للـ form الجديد
-        fetchPreviewTag();
-    }, [fetchPreviewTag]);
+    }, []);
 
     const handleSubmit = useCallback(
         async (e) => {
@@ -482,6 +325,7 @@ export default function Upload() {
             }
 
             const name = patientData.patient_name?.trim();
+            const tag = patientData.patient_tag?.trim();
             const age = patientData.patient_age?.trim();
 
             if (!name) {
@@ -500,12 +344,7 @@ export default function Upload() {
             formData.append('patient_name', name);
             formData.append('patient_age', age);
             formData.append('patient_gender', patientData.patient_gender);
-
-            // 🔴🔴🔴 ابعت الـ tag (سواء كان من الـ preview أو من الـ fetch)
-            const tag = patientData.patient_tag?.trim();
-            if (tag) {
-                formData.append('patient_tag', tag);
-            }
+            formData.append('patient_tag', tag);
 
             Object.entries(historyData).forEach(([key, val]) => {
                 if (key === 'pack_years') {
@@ -593,12 +432,7 @@ export default function Upload() {
     return (
         <div className="max-w-4xl mx-auto relative pb-12">
 
-            <FetchPatientModal
-                isOpen={isFetchModalOpen}
-                onClose={() => setIsFetchModalOpen(false)}
-                onFetchSuccess={handleFetchSuccess}
-            />
-
+            {/* شاشة الرفع المؤقتة */}
             {isUploadingFiles && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center transition-all duration-300">
                     <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
@@ -631,56 +465,36 @@ export default function Upload() {
                     <SectionHeader step={1} icon={User} title="Patient Information" />
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {/* ════════════════════════════════════════════════════════════════
-                            🔴🔴🔴 التعديل النهائي:
-                            - الحقل بيظهر فيه الـ ID الفعلي (مش placeholder)
-                            - الخط عادي (مش مائل)
-                            - فيه زرار Refresh صغير لتوليد ID جديد
-                            - فيه زرار Fetch لجلب بيانات مريض موجود
-                            ════════════════════════════════════════════════════════════════ */}
                         <div className="sm:col-span-2">
-                            <FormField label="Patient ID / Tag" name="patient_tag" required>
+                            <FormField label="Patient ID / Tag" name="patient_tag" required placeholder="Enter ID to auto-fill or register new...">
                                 <div className="relative">
-                                    <Hash size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-
+                                    <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                                     <input
                                         type="text"
                                         name="patient_tag"
+                                        required
                                         value={patientData.patient_tag}
-                                        readOnly
-                                        placeholder="Generating..."
-                                        className="w-full pl-10 pr-44 py-3 rounded-xl border outline-none transition-all duration-200 text-sm bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-100 border-slate-200 dark:border-slate-700 focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 cursor-not-allowed font-mono font-semibold"
+                                        onChange={handlePatientChange}
+                                        placeholder="Enter ID to auto-fill or register new..."
+                                        className="w-full pl-10 pr-28 py-3 rounded-xl border outline-none transition-all duration-200 text-sm bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 border-slate-200 dark:border-slate-700 focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 hover:border-slate-300 dark:hover:border-slate-600"
+                                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), fetchPatientData())}
                                     />
-
-                                    {/* زرار Refresh (يسار) لتوليد ID جديد */}
                                     <button
                                         type="button"
-                                        onClick={handleRefreshTag}
-                                        disabled={isLoadingTag || isUploadingFiles}
-                                        title="Generate new ID"
-                                        className="absolute right-20 top-1/2 -translate-y-1/2 flex items-center justify-center bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 w-9 h-9 rounded-lg transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onClick={fetchPatientData}
+                                        disabled={isFetchingPatient}
+                                        className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        {isLoadingTag ? (
+                                        {isFetchingPatient ? (
                                             <Loader2 size={14} className="animate-spin" />
                                         ) : (
-                                            <RefreshCw size={14} />
+                                            <>
+                                                <Search size={13} />
+                                                Fetch
+                                            </>
                                         )}
                                     </button>
-
-                                    {/* زرار Fetch (يمين) لجلب مريض موجود */}
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsFetchModalOpen(true)}
-                                        disabled={isUploadingFiles}
-                                        className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 shadow-sm disabled:opacity-50"
-                                    >
-                                        <Search size={13} />
-                                        Fetch
-                                    </button>
                                 </div>
-                                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
-                                    💡 Auto-generated ID for this patient. Click <span className="font-semibold text-blue-600 dark:text-blue-400">Fetch</span> to load an existing patient, or <span className="font-semibold text-slate-600 dark:text-slate-300">↻</span> to generate a new ID.
-                                </p>
                             </FormField>
                         </div>
 

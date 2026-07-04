@@ -1,0 +1,124 @@
+lung_cancer_ai_project/
+├── backend
+│   ├── api
+│   │   ├── __init__.py
+│   │   ├── admin.py
+│   │   ├── auth.py
+│   │   ├── dashboard.py
+│   │   ├── doctors.py
+│   │   ├── health.py
+│   │   ├── patients.py
+│   │   ├── reports.py
+│   │   ├── scans.py
+│   │   ├── windowing.py
+│   │   └── ws.py
+│   ├── core
+│   │   ├── __init__.py
+│   │   ├── ai_service.py
+│   │   ├── config.py
+│   │   ├── pdf_generator.py
+│   │   ├── security.py
+│   │   └── websocket_manager.py
+│   ├── db
+│   │   ├── __init__.py
+│   │   ├── database.py
+│   │   └── models.py
+│   ├── reports
+│   ├── schemas
+│   │   ├── __init__.py
+│   │   ├── annotation.py
+│   │   └── doctor.py
+│   ├── snapshots
+│   ├── uploads
+│   ├── create_admin.py
+│   ├── luna_model_final_1.pth
+│   ├── main.py
+│   └── requirements.txt
+├── frontend
+│   ├── public
+│   │   ├── favicon.svg
+│   │   └── icons.svg
+│   ├── src
+│   │   ├── api
+│   │   │   └── axios.js
+│   │   ├── assets
+│   │   │   ├── hero.png
+│   │   │   ├── react.svg
+│   │   │   └── vite.svg
+│   │   ├── components
+│   │   │   ├── AdminShared.jsx
+│   │   │   ├── ConfirmDialog.jsx
+│   │   │   └── Layout.jsx
+│   │   ├── context
+│   │   │   ├── AuthContext.jsx
+│   │   │   ├── ScanProcessingContext.jsx
+│   │   │   └── ThemeContext.jsx
+│   │   ├── pages
+│   │   │   ├── AdminAnalytics.jsx
+│   │   │   ├── AdminDoctors.jsx
+│   │   │   ├── AdminOverview.jsx
+│   │   │   ├── AdminPatientSearch.jsx
+│   │   │   ├── AdminScans.jsx
+│   │   │   ├── AdminSystemHealth.jsx
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── Login.jsx
+│   │   │   ├── Patients.jsx
+│   │   │   ├── Profile.jsx
+│   │   │   ├── Reports.jsx
+│   │   │   ├── ScanViewer.jsx
+│   │   │   ├── Upload.jsx
+│   │   │   └── ViewerList.jsx
+│   │   ├── utils
+│   │   │   └── windowing.js
+│   │   ├── App.css
+│   │   ├── App.jsx
+│   │   ├── index.css
+│   │   └── main.jsx
+│   ├── .env
+│   ├── .gitignore
+│   ├── README.md
+│   ├── eslint.config.js
+│   ├── index.html
+│   ├── package.json
+│   ├── postcss.config.js
+│   ├── tailwind.config.js
+│   └── vite.config.js
+├── src
+│   ├── api
+│   │   └── axios.js
+│   ├── assets
+│   │   ├── hero.png
+│   │   ├── react.svg
+│   │   └── vite.svg
+│   ├── components
+│   │   ├── AdminShared.jsx
+│   │   ├── ConfirmDialog.jsx
+│   │   └── Layout.jsx
+│   ├── context
+│   │   ├── AuthContext.jsx
+│   │   ├── ScanProcessingContext.jsx
+│   │   └── ThemeContext.jsx
+│   ├── pages
+│   │   ├── AdminAnalytics.jsx
+│   │   ├── AdminDoctors.jsx
+│   │   ├── AdminOverview.jsx
+│   │   ├── AdminPatientSearch.jsx
+│   │   ├── AdminScans.jsx
+│   │   ├── AdminSystemHealth.jsx
+│   │   ├── Dashboard.jsx
+│   │   ├── Login.jsx
+│   │   ├── Patients.jsx
+│   │   ├── Profile.jsx
+│   │   ├── Reports.jsx
+│   │   ├── ScanViewer.jsx
+│   │   ├── Upload.jsx
+│   │   └── ViewerList.jsx
+│   ├── utils
+│   │   └── windowing.js
+│   ├── App.css
+│   ├── App.jsx
+│   ├── index.css
+│   └── main.jsx
+├── extract_code.py
+├── generate_tree.py
+└── project_code_summary.txt

@@ -1,13 +1,17 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 import os
 import shutil
 import uuid
 import math
+import random
+import string
+from datetime import datetime
 from pydantic import BaseModel
-from PIL import Image, ImageDraw 
+from PIL import Image, ImageDraw
 from db import models, database
 from core.security import get_current_doctor
 from core.ai_service import add_to_queue
@@ -17,13 +21,44 @@ router = APIRouter()
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-MAX_FILE_SIZE = 500 * 1024 * 1024 
+MAX_FILE_SIZE = 500 * 1024 * 1024
+
+
+# ════════════════════════════════════════════════════════════════════
+# 🔴🔴 دالة توليد Patient ID / Tag تلقائياً
+# ════════════════════════════════════════════════════════════════════
+# الصيغة: HOSP-YYYY-NNNNN
+#   - HOSP = ثابت (Hospital prefix)
+#   - YYYY = السنة الحالية (مثلاً 2024)
+#   - NNNNN = 5 أرقام عشوائية (10000 - 99999)
+# مثال: HOSP-2024-58392
+# ════════════════════════════════════════════════════════════════════
+def _generate_patient_tag(db: Session) -> str:
+    """
+    ولّد patient_tag فريد بصيغة HOSP-YYYY-NNNNN.
+    بيـ retry لحد ما يلاقي واحد مش موجود في الـ DB (تفادي الـ collisions النادرة).
+    """
+    year = datetime.utcnow().year
+    max_retries = 10
+
+    for _ in range(max_retries):
+        random_num = random.randint(10000, 99999)
+        tag = f"HOSP-{year}-{random_num}"
+
+        existing = db.query(models.Patient).filter(models.Patient.patient_id_tag == tag).first()
+        if not existing:
+            return tag
+
+    # fallback ضعيف الاحتمال
+    random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    return f"HOSP-{year}-{random_str}"
+
 
 class PatientUpdate(BaseModel):
     name: str
     age: int
     gender: str
-    
+
     has_previous_tumors: bool
     prev_tumors_details: Optional[str] = None
     occupational_exposure: bool = False
@@ -36,7 +71,7 @@ class PatientUpdate(BaseModel):
     coughing_blood_details: Optional[str] = None
     weight_loss: bool = False
     weight_loss_details: Optional[str] = None
-    
+
     previous_chest_diseases: Optional[str] = None
     is_smoker: bool
     pack_years: Optional[int] = 0
@@ -47,21 +82,21 @@ class PatientUpdate(BaseModel):
 def update_nodule_snapshot(scan_id, nodule_id, slice_number, coord_x, coord_y, diameter):
     if diameter is None:
         diameter = 40.0
-        
+
     slice_path = os.path.join("snapshots", f"scan_{scan_id}_slices", f"slice_{slice_number}.jpg")
     out_path = os.path.join("snapshots", f"scan_{scan_id}_nodule_{nodule_id}.png")
-    
+
     if os.path.exists(slice_path):
         try:
             img = Image.open(slice_path).convert("RGB")
             draw = ImageDraw.Draw(img)
             r = diameter / 2.0
-            
+
             left = max(0, coord_x - r)
             top = max(0, coord_y - r)
             right = min(img.width, coord_x + r)
             bottom = min(img.height, coord_y + r)
-            
+
             draw.rectangle([left, top, right, bottom], outline="red", width=2)
             img.save(out_path, format="PNG")
         except Exception as e:
@@ -69,23 +104,43 @@ def update_nodule_snapshot(scan_id, nodule_id, slice_number, coord_x, coord_y, d
     else:
         print(f"Slice path does not exist: {slice_path}")
 
+
+# ════════════════════════════════════════════════════════════════════
+# 🔴🔴🔴 جديد: endpoint لتوليد ID معاينة للعرض في الـ form
+# ════════════════════════════════════════════════════════════════════
+# بيتبقى لما الصفحة تفتح، يطلب الـ frontend ID معاينة ويعرضه في الحقل
+# الـ ID ده مش متسجل في الـ DB — هو مجرد "اقتراح" للـ ID اللي هيتسجل
+# لما الدكتور يعمل submit، الـ backend هيستخدم الـ ID ده لو مفيش مريض بيه
+# ════════════════════════════════════════════════════════════════════
+@router.get("/generate-tag-preview", summary="Generate a preview Patient ID for the upload form")
+def generate_tag_preview(
+    current_doctor: models.Doctor = Depends(get_current_doctor),
+    db: Session = Depends(database.get_db),
+):
+    """
+    ولّد ID معاينة بصيغة HOSP-YYYY-NNNNN لعرضه في حقل الـ Patient ID في صفحة Upload.
+    الـ ID ده مش متسجل في الـ DB — هيتسجل فعلياً لما الدكتور يعمل submit.
+    """
+    tag = _generate_patient_tag(db)
+    return {"tag": tag}
+
+
 @router.get("", summary="Get scans with pagination and filters")
 def get_doctor_scans(
     page: int = Query(1, ge=1), limit: int = Query(10, ge=1, le=100), search: Optional[str] = None,
     status: Optional[str] = "All", current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(database.get_db)
 ):
     query = db.query(models.Scan).filter(models.Scan.doctor_id == current_doctor.id)
-    
+
     if search:
         query = query.join(models.Patient, models.Scan.patient_id == models.Patient.id).filter(
             or_(models.Scan.id.ilike(f"%{search}%"), models.Patient.name.ilike(f"%{search}%"), models.Patient.patient_id_tag.ilike(f"%{search}%"))
         )
 
-    # 🔴 التعديل هنا لفصل الـ Completed عن الـ Needs Review (Unreviewed) 🔴
     if status and status != "All":
         if status == "Needs Review":
             query = query.join(models.Annotation).filter(
-                models.Scan.status == "Completed", 
+                models.Scan.status == "Completed",
                 models.Annotation.status == "Pending"
             ).distinct()
         elif status == "Completed":
@@ -104,40 +159,51 @@ def get_doctor_scans(
 
     total_items = query.count()
     total_pages = math.ceil(total_items / limit) if total_items > 0 else 1
-    
+
     scans = query.options(joinedload(models.Scan.annotations)).order_by(models.Scan.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
-    
+
     data = []
     for s in scans:
         pending_count = sum(1 for a in s.annotations if a.status == 'Pending')
-        
+
         derived_status = s.status
         if s.status == "Completed" and pending_count > 0:
             derived_status = "Needs Review"
-            
+
         data.append({
-            "scan_id": s.id, 
-            "patient_name": s.patient.name, 
-            "patient_tag": s.patient.patient_id_tag, 
+            "scan_id": s.id,
+            "patient_name": s.patient.name,
+            "patient_tag": s.patient.patient_id_tag,
             "status": s.status,
             "derived_status": derived_status,
             "pending_count": pending_count,
             "upload_date": s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "Unknown"
         })
-        
+
     return {"data": data, "total_items": total_items, "total_pages": total_pages, "current_page": page}
 
+
+# ════════════════════════════════════════════════════════════════════
+# 🔴🔴🔴 التعديل الجوهري في endpoint الـ upload
+# ════════════════════════════════════════════════════════════════════
+# الـ logic الجديد:
+#   - لو الدكتور ما بعتش tag → ولّد واحد تلقائياً (fallback)
+#   - لو الدكتور بعت tag (من الـ preview أو من الـ Fetch):
+#       - لو المريض موجود في الـ DB → تحديث بياناته (حالة Fetch)
+#       - لو المريض مش موجود → إنشاء مريض جديد بالـ tag ده (حالة Preview)
+#   - لو حصل collision (race condition نادرة) → ولّد tag جديد وأعد المحاولة
+# ════════════════════════════════════════════════════════════════════
 @router.post("/upload", summary="Upload Scan")
 def upload_scan(
-    patient_name: str = Form(...), patient_age: int = Form(...), patient_gender: str = Form(...), patient_tag: str = Form(...), 
+    patient_name: str = Form(...), patient_age: int = Form(...), patient_gender: str = Form(...), patient_tag: Optional[str] = Form(None),
     has_previous_tumors: bool = Form(False), prev_tumors_details: Optional[str] = Form(None),
     occupational_exposure: bool = Form(False), occ_exposure_details: Optional[str] = Form(None),
     chest_pain_complaint: bool = Form(False), chest_pain_details: Optional[str] = Form(None),
     chronic_cough: bool = Form(False), chronic_cough_details: Optional[str] = Form(None),
     coughing_blood: bool = Form(False), coughing_blood_details: Optional[str] = Form(None),
     weight_loss: bool = Form(False), weight_loss_details: Optional[str] = Form(None),
-    previous_chest_diseases: Optional[str] = Form(None), is_smoker: bool = Form(False), pack_years: Optional[int] = Form(0), 
-    smoking_cessation_date: Optional[str] = Form(None), family_history: Optional[str] = Form(None), 
+    previous_chest_diseases: Optional[str] = Form(None), is_smoker: bool = Form(False), pack_years: Optional[int] = Form(0),
+    smoking_cessation_date: Optional[str] = Form(None), family_history: Optional[str] = Form(None),
     files: List[UploadFile] = File(...), current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(database.get_db)
 ):
     if len(files) != 2: raise HTTPException(status_code=400, detail="يجب رفع ملفين بالضبط: ملف .mhd وملف .raw")
@@ -146,7 +212,7 @@ def upload_scan(
     if not mhd_file or not raw_file: raise HTTPException(status_code=400, detail="صيغة الملفات غير صحيحة.")
 
     patient_data = {
-        "name": patient_name, "age": patient_age, "gender": patient_gender, "patient_id_tag": patient_tag,
+        "name": patient_name, "age": patient_age, "gender": patient_gender,
         "has_previous_tumors": has_previous_tumors, "prev_tumors_details": prev_tumors_details if has_previous_tumors else None,
         "occupational_exposure": occupational_exposure, "occ_exposure_details": occ_exposure_details if occupational_exposure else None,
         "chest_pain_complaint": chest_pain_complaint, "chest_pain_details": chest_pain_details if chest_pain_complaint else None,
@@ -158,38 +224,75 @@ def upload_scan(
         "family_history": family_history, "doctor_notes": None
     }
 
-    patient = db.query(models.Patient).filter(models.Patient.patient_id_tag == patient_tag).first()
-    if not patient:
+    # ════════════════════════════════════════════════════════════════════
+    # 🔴🔴🔴 الـ logic الجديد للتعامل مع الـ patient_tag
+    # ════════════════════════════════════════════════════════════════════
+    submitted_tag = patient_tag.strip() if patient_tag else ""
+
+    if not submitted_tag:
+        # 🔴 حالة 1: مفيش tag → ولّد واحد جديد
+        new_tag = _generate_patient_tag(db)
+        patient_data["patient_id_tag"] = new_tag
         patient = models.Patient(**patient_data)
         db.add(patient)
+        db.commit()
+        db.refresh(patient)
     else:
-        for key, value in patient_data.items(): setattr(patient, key, value)
-    db.commit()
-    db.refresh(patient)
+        # 🔴 حالة 2 أو 3: فيه tag → شوف هل المريض موجود ولا لأ
+        patient = db.query(models.Patient).filter(models.Patient.patient_id_tag == submitted_tag).first()
+
+        if patient:
+            # 🔴 حالة 2: المريض موجود (من الـ Fetch) → تحديث بياناته
+            for key, value in patient_data.items():
+                setattr(patient, key, value)
+            db.commit()
+            db.refresh(patient)
+        else:
+            # 🔴 حالة 3: المريض مش موجود (من الـ Preview) → إنشاء مريض جديد بالـ tag ده
+            patient_data["patient_id_tag"] = submitted_tag
+            patient = models.Patient(**patient_data)
+            db.add(patient)
+            try:
+                db.commit()
+                db.refresh(patient)
+            except IntegrityError:
+                # 🔴 race condition نادرة: اتنين دكاترة بعتوا نفس الـ tag في نفس الوقت
+                # → ولّد tag جديد وأعد المحاولة
+                db.rollback()
+                new_tag = _generate_patient_tag(db)
+                patient_data["patient_id_tag"] = new_tag
+                patient = models.Patient(**patient_data)
+                db.add(patient)
+                db.commit()
+                db.refresh(patient)
 
     scan_id = str(uuid.uuid4())
     scan_dir = os.path.join(UPLOAD_DIR, scan_id)
     os.makedirs(scan_dir, exist_ok=True)
-    
+
     for file in files:
         file_path = os.path.join(scan_dir, file.filename)
         with open(file_path, "wb") as buffer:
             file_size = 0
-            while chunk := file.file.read(1024 * 1024): 
+            while chunk := file.file.read(1024 * 1024):
                 file_size += len(chunk)
                 if file_size > MAX_FILE_SIZE:
                     buffer.close()
-                    shutil.rmtree(scan_dir, ignore_errors=True) 
+                    shutil.rmtree(scan_dir, ignore_errors=True)
                     raise HTTPException(status_code=413, detail=f"الملف كبير جداً.")
                 buffer.write(chunk)
 
-    new_scan = models.Scan(id=scan_id, doctor_id=current_doctor.id, patient_id=patient.id, folder_path=scan_dir, status="Processing") 
+    new_scan = models.Scan(id=scan_id, doctor_id=current_doctor.id, patient_id=patient.id, folder_path=scan_dir, status="Processing")
     db.add(new_scan)
     db.commit()
-    
+
     add_to_queue(scan_id)
-    
-    return {"message": "Upload started", "scan_id": scan_id}
+
+    return {
+        "message": "Upload started",
+        "scan_id": scan_id,
+        "patient_tag": patient.patient_id_tag
+    }
 
 @router.get("/{scan_id}/progress")
 def get_progress(scan_id: str, db: Session = Depends(database.get_db)):
@@ -197,30 +300,35 @@ def get_progress(scan_id: str, db: Session = Depends(database.get_db)):
     if not scan: return {"progress": 0, "total_slices": 0, "status": "Unknown"}
     return {"progress": scan.progress, "total_slices": scan.total_slices, "status": scan.status}
 
+# 🔴🔴 فلتر الـ "Rejected" من نتائج الـ ScanViewer والـ Reports
 @router.get("/{scan_id}/results")
 def get_scan_results(scan_id: str, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(database.get_db)):
     scan = db.query(models.Scan).filter(models.Scan.id == scan_id).first()
     if not scan or (scan.doctor_id != current_doctor.id and not current_doctor.is_admin): raise HTTPException(404, "Not found.")
-    
+
     slices_dir = os.path.join("snapshots", f"scan_{scan_id}_slices")
     total_slices = len(os.listdir(slices_dir)) if os.path.exists(slices_dir) else scan.total_slices
-    annotations = db.query(models.Annotation).filter(models.Annotation.scan_id == scan_id).all()
-    
+
+    annotations = db.query(models.Annotation).filter(
+        models.Annotation.scan_id == scan_id,
+        models.Annotation.status != "Rejected"
+    ).all()
+
     return {
         "scan_id": scan.id, "status": scan.status, "total_slices": total_slices,
         "upload_date": scan.created_at.strftime("%Y-%m-%d %H:%M") if scan.created_at else "Unknown",
         "patient_details": {
             "name": scan.patient.name, "age": scan.patient.age, "gender": scan.patient.gender, "tag": scan.patient.patient_id_tag,
-            
+
             "has_previous_tumors": scan.patient.has_previous_tumors, "prev_tumors_details": scan.patient.prev_tumors_details,
             "occupational_exposure": scan.patient.occupational_exposure, "occ_exposure_details": scan.patient.occ_exposure_details,
             "chest_pain_complaint": scan.patient.chest_pain_complaint, "chest_pain_details": scan.patient.chest_pain_details,
             "chronic_cough": scan.patient.chronic_cough, "chronic_cough_details": scan.patient.chronic_cough_details,
             "coughing_blood": scan.patient.coughing_blood, "coughing_blood_details": scan.patient.coughing_blood_details,
             "weight_loss": scan.patient.weight_loss, "weight_loss_details": scan.patient.weight_loss_details,
-            
-            "previous_chest_diseases": scan.patient.previous_chest_diseases, "is_smoker": scan.patient.is_smoker, 
-            "pack_years": scan.patient.pack_years, "smoking_cessation_date": scan.patient.smoking_cessation_date, 
+
+            "previous_chest_diseases": scan.patient.previous_chest_diseases, "is_smoker": scan.patient.is_smoker,
+            "pack_years": scan.patient.pack_years, "smoking_cessation_date": scan.patient.smoking_cessation_date,
             "family_history": scan.patient.family_history, "doctor_notes": scan.patient.doctor_notes
         },
         "results": annotations
@@ -242,13 +350,13 @@ def add_annotation(scan_id: str, ann_data: annotation_schemas.AnnotationCreate, 
     scan = db.query(models.Scan).filter(models.Scan.id == scan_id).first()
     if not scan: raise HTTPException(404, "Not found.")
     new_ann = models.Annotation(
-        scan_id=scan_id, 
-        slice_number=ann_data.slice_number, 
-        coord_x=ann_data.coord_x, 
-        coord_y=ann_data.coord_y, 
-        diameter=ann_data.diameter, 
-        confidence=1.0, 
-        source="Doctor", 
+        scan_id=scan_id,
+        slice_number=ann_data.slice_number,
+        coord_x=ann_data.coord_x,
+        coord_y=ann_data.coord_y,
+        diameter=ann_data.diameter,
+        confidence=1.0,
+        source="Doctor",
         status="Approved",
         start_slice=ann_data.start_slice if ann_data.start_slice is not None else max(0, ann_data.slice_number - 8),
         end_slice=ann_data.end_slice if ann_data.end_slice is not None else ann_data.slice_number + 8
@@ -265,65 +373,92 @@ def update_annotation(scan_id: str, annotation_id: int, annotation_data: annotat
     if not scan: raise HTTPException(404, "Not found.")
     db_ann = db.query(models.Annotation).filter(models.Annotation.id == annotation_id, models.Annotation.scan_id == scan_id).first()
     if not db_ann: raise HTTPException(404, "Not found.")
-    
+
     if annotation_data.status is not None: db_ann.status = annotation_data.status
     if annotation_data.coord_x is not None: db_ann.coord_x = annotation_data.coord_x
     if annotation_data.coord_y is not None: db_ann.coord_y = annotation_data.coord_y
     if annotation_data.start_slice is not None: db_ann.start_slice = annotation_data.start_slice
     if annotation_data.end_slice is not None: db_ann.end_slice = annotation_data.end_slice
-    
+
     db.commit()
     db.refresh(db_ann)
     update_nodule_snapshot(scan_id, db_ann.id, db_ann.slice_number, db_ann.coord_x, db_ann.coord_y, db_ann.diameter)
     return {"message": "Updated"}
 
+# 🔴🔴 Soft Delete (Rejected بدل من الحذف الفعلي)
 @router.delete("/{scan_id}/annotations/{annotation_id}")
 def delete_annotation(scan_id: str, annotation_id: int, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(database.get_db)):
-    db_ann = db.query(models.Annotation).filter(models.Annotation.id == annotation_id, models.Annotation.scan_id == scan_id).first()
-    if db_ann:
-        db.delete(db_ann)
-        db.commit()
-    return {"message": "Deleted"}
+    db_ann = db.query(models.Annotation).filter(
+        models.Annotation.id == annotation_id,
+        models.Annotation.scan_id == scan_id
+    ).first()
+
+    if not db_ann:
+        raise HTTPException(404, "Annotation not found.")
+
+    db_ann.status = "Rejected"
+    db.commit()
+
+    snapshot_path = os.path.join("snapshots", f"scan_{scan_id}_nodule_{annotation_id}.png")
+    if os.path.exists(snapshot_path):
+        try:
+            os.remove(snapshot_path)
+        except Exception as e:
+            print(f"⚠️ Could not delete snapshot {snapshot_path}: {e}")
+
+    return {"message": "Annotation rejected successfully"}
 
 @router.post("/{scan_id}/reanalyze")
 def reanalyze_scan(scan_id: str, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(database.get_db)):
     scan = db.query(models.Scan).filter(models.Scan.id == scan_id).first()
     if not scan: raise HTTPException(404, "Not found.")
-    deleted = db.query(models.Annotation).filter(models.Annotation.scan_id == scan_id, models.Annotation.source == "AI").delete()
+
+    deleted = db.query(models.Annotation).filter(
+        models.Annotation.scan_id == scan_id,
+        models.Annotation.source == "AI"
+    ).delete()
+
     for ann in db.query(models.Annotation).filter(models.Annotation.scan_id == scan_id).all():
         img = os.path.join("snapshots", f"scan_{scan_id}_nodule_{ann.id}.png")
         if os.path.exists(img): os.remove(img)
-        
-    scan.status = "Processing" 
+
+    scan.status = "Processing"
     scan.progress = 0
     db.commit()
     add_to_queue(scan_id)
-    
+
     return {"message": "تم", "scan_id": scan_id, "deleted_annotations": deleted}
 
 @router.delete("/{scan_id}")
 def delete_scan(scan_id: str, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(database.get_db)):
     scan = db.query(models.Scan).filter(models.Scan.id == scan_id).first()
     if not scan: raise HTTPException(404, "Not found.")
-    if scan.folder_path and os.path.exists(scan.folder_path): shutil.rmtree(scan.folder_path, ignore_errors=True)
+
+    if scan.folder_path and os.path.exists(scan.folder_path):
+        shutil.rmtree(scan.folder_path, ignore_errors=True)
+
     slices_dir = os.path.join("snapshots", f"scan_{scan_id}_slices")
-    if os.path.exists(slices_dir): shutil.rmtree(slices_dir, ignore_errors=True)
+    if os.path.exists(slices_dir):
+        shutil.rmtree(slices_dir, ignore_errors=True)
+
     for ann in scan.annotations:
         img = os.path.join("snapshots", f"scan_{scan_id}_nodule_{ann.id}.png")
         if os.path.exists(img): os.remove(img)
+
     pdf = os.path.join("reports", f"Medical_Report_{scan_id}.pdf")
     if os.path.exists(pdf): os.remove(pdf)
+
     db.query(models.Annotation).filter(models.Annotation.scan_id == scan_id).delete()
-    
+
     patient_id = scan.patient_id
     db.delete(scan)
     db.commit()
-    
+
     remaining_scans = db.query(models.Scan).filter(models.Scan.patient_id == patient_id).count()
     if remaining_scans == 0:
         patient = db.query(models.Patient).filter(models.Patient.id == patient_id).first()
         if patient:
             db.delete(patient)
             db.commit()
-            
+
     return {"message": "Deleted"}

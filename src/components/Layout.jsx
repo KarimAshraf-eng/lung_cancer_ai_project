@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Activity, UploadCloud, FileText, LogOut, ShieldCheck, User, MonitorPlay, Moon, Sun, Menu, X, Users, ChevronsUpDown, Minus, CircleStop, Loader2, ScanSearch, UserSearch, BarChart3, Server, Radio } from 'lucide-react';
+import { Activity, UploadCloud, FileText, LogOut, ShieldCheck, User, MonitorPlay, Moon, Sun, Menu, X, Users, ChevronsUpDown, Minus, CircleStop, Loader2, ScanSearch, UserSearch, BarChart3, Server } from 'lucide-react';
 import { useContext, useState, useRef, useEffect } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { ThemeContext } from '../context/ThemeContext';
@@ -19,13 +19,11 @@ export default function Layout() {
 
     const isAdmin = user?.is_admin === true;
 
-    // 🔴🔴 تحديث قائمة الـ Admin الجانبية (Sidebar) — أضفنا Doctor Activity
+    // 🔴 تحديث قائمة الـ Admin الجانبية (Sidebar)
     const menuItems = isAdmin
         ? [
             { name: 'Overview', path: '/admin/overview', icon: <ShieldCheck size={20} /> },
             { name: 'Doctors', path: '/admin/doctors', icon: <Users size={20} /> },
-            // 🔴🔴 جديد: Doctor Activity
-            { name: 'Doctor Activity', path: '/admin/doctor-activity', icon: <Radio size={20} /> },
             { name: 'Scans', path: '/admin/scans', icon: <ScanSearch size={20} /> },
             { name: 'Patient Search', path: '/admin/patients', icon: <UserSearch size={20} /> },
             { name: 'Analytics', path: '/admin/analytics', icon: <BarChart3 size={20} /> },
@@ -51,7 +49,7 @@ export default function Layout() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // 🔴🔴 تحديث التوجيه التلقائي للـ Admin
+    // 🔴 تحديث التوجيه التلقائي للـ Admin
     useEffect(() => {
         if (isAdmin && !location.pathname.startsWith('/admin') && location.pathname !== '/profile' && location.pathname !== '/login') {
             navigate('/admin/overview', { replace: true });

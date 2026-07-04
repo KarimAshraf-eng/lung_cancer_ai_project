@@ -18,8 +18,6 @@ import AdminScans from './pages/AdminScans';
 import AdminPatientSearch from './pages/AdminPatientSearch';
 import AdminAnalytics from './pages/AdminAnalytics';
 import AdminSystemHealth from './pages/AdminSystemHealth';
-// 🔴🔴 جديد: صفحة Doctor Activity
-import DoctorActivity from './pages/DoctorActivity';
 
 import { AuthProvider, AuthContext } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -61,8 +59,6 @@ function AppRoutes() {
         {/* 🔴 مسارات الـ Admin الجديدة المنفصلة */}
         <Route path="admin/overview" element={<ProtectedRoute adminOnly={true}><AdminOverview /></ProtectedRoute>} />
         <Route path="admin/doctors" element={<ProtectedRoute adminOnly={true}><AdminDoctors /></ProtectedRoute>} />
-        {/* 🔴🔴 جديد: route لصفحة Doctor Activity */}
-        <Route path="admin/doctor-activity" element={<ProtectedRoute adminOnly={true}><DoctorActivity /></ProtectedRoute>} />
         <Route path="admin/scans" element={<ProtectedRoute adminOnly={true}><AdminScans /></ProtectedRoute>} />
         <Route path="admin/patients" element={<ProtectedRoute adminOnly={true}><AdminPatientSearch /></ProtectedRoute>} />
         <Route path="admin/analytics" element={<ProtectedRoute adminOnly={true}><AdminAnalytics /></ProtectedRoute>} />

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Users, Heart, Zap, TrendingUp, Brain, Clock, Activity, ArrowUpRight } from 'lucide-react';
+import { Users, Heart, Zap, TrendingUp, Brain, Clock, Activity, ArrowUpRight, LogIn, LogOut, Wifi, WifiOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 import { StatCard, StatusPill, getStatusDot, getStatusBadge, formatDateTime, EmptyState } from '../components/AdminShared';
@@ -17,22 +17,22 @@ export default function AdminOverview() {
     const navigate = useNavigate();
     const [overview, setOverview] = useState(null);
     const [period, setPeriod] = useState('today');
-    const [recentLogins, setRecentLogins] = useState([]);
+    const [liveActivity, setLiveActivity] = useState([]);   // 🔴🔴 جديد: بدل recentLogins
     const [recentActivity, setRecentActivity] = useState([]);
     const [aiStatus, setAiStatus] = useState(null);
     const [loading, setLoading] = useState(true);
 
     const fetchOverview = useCallback(async () => {
         try {
-            const [overviewRes, loginsRes, activityRes, aiRes] = await Promise.all([
+            const [overviewRes, activityRes, scansRes, aiRes] = await Promise.all([
                 api.get('/admin/overview', { params: { period } }),
-                api.get('/admin/recent-logins'),
+                api.get('/admin/recent-logins', { params: { limit: 20 } }),  // 🔴🔴 زي الـ limit لـ 20
                 api.get('/admin/recent-activity'),
                 api.get('/admin/ai-status'),
             ]);
             setOverview(overviewRes.data);
-            setRecentLogins(loginsRes.data);
-            setRecentActivity(activityRes.data);
+            setLiveActivity(activityRes.data);   // 🔴🔴 بدل recentLogins
+            setRecentActivity(scansRes.data);
             setAiStatus(aiRes.data);
         } catch (err) {
             console.error("Failed to load overview data.");
@@ -43,7 +43,7 @@ export default function AdminOverview() {
 
     useEffect(() => {
         fetchOverview();
-        const interval = setInterval(fetchOverview, 2000);
+        const interval = setInterval(fetchOverview, 2000);  // 🔴🔴 كل ثانيتين للتحديث اللحظي
 
         let ws;
         try {
@@ -51,7 +51,7 @@ export default function AdminOverview() {
             const wsUrl = baseUrl.replace(/^http/, 'ws');
             ws = new WebSocket(`${wsUrl}/ws/admin-updates`);
             ws.onmessage = () => {
-                fetchOverview();
+                fetchOverview();  // تحديث فوري عند وصول أي إشعار (login/logout)
             };
         } catch (e) {
             console.error("WebSocket connection failed", e);
@@ -123,61 +123,118 @@ export default function AdminOverview() {
                 ))}
             </div>
 
-            {/* القسم المحدث: Latest Scans بجانب Recent Logins بنفس الارتفاع */}
+            {/* ════════════════════════════════════════════════════════════════
+                🔴🔴 التعديل: "Live Doctor Activity" بدل "Recent Logins"
+                بيراقب login + logout مع نقطة خضراء (online) ونقطة حمراء (offline)
+            ════════════════════════════════════════════════════════════════ */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                 {/* Latest Scans */}
-                <div className="xl:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col h-[500px]">
+                <div className="xl:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col h-[600px]">
                     <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
-                        <h3 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2"><Activity size={16} className="text-violet-500" /> Latest Scans</h3>
-                        <button onClick={() => navigate('/admin/scans')} className="text-[10px] font-bold text-blue-500 hover:text-blue-600 flex items-center gap-1">View All <ArrowUpRight size={10} /></button>
-                    </div>
-                    <div className="divide-y divide-slate-50 dark:divide-slate-800/50 overflow-y-auto flex-1 custom-scrollbar">
-                        {recentActivity.length === 0 ? <EmptyState icon={<Activity size={32} className="opacity-30" />} message="No scans recorded yet" /> : recentActivity.map((act, i) => (
-                            <div key={i} className="px-6 py-3.5 hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-2 h-2 rounded-full ${getStatusDot(act.display_status || act.status)}`}></div>
-                                    <div>
-                                        <p className="text-sm font-bold text-slate-800 dark:text-white">{act.patient_name}</p>
-                                        <p className="text-[10px] text-slate-500 dark:text-slate-400">by Dr. {act.doctor_name} &middot; <span className="font-mono">{act.patient_tag}</span></p>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold border ${getStatusBadge(act.display_status || act.status)}`}>{act.display_status || act.status}</span>
-                                    <p className="text-[10px] text-slate-400 mt-1">{act.created_at}</p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Recent Logins - الآن يأخذ الطول الكامل */}
-                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col h-[500px]">
-                    <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
                         <h3 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                            <Clock size={16} className="text-blue-500" /> Recent Logins
+                            <Activity size={16} className="text-violet-500" /> Latest Scans
                         </h3>
+                        <button onClick={() => navigate('/admin/scans')} className="text-[10px] font-bold text-blue-500 hover:text-blue-600 flex items-center gap-1">
+                            View All <ArrowUpRight size={10} />
+                        </button>
                     </div>
                     <div className="divide-y divide-slate-50 dark:divide-slate-800/50 overflow-y-auto flex-1 custom-scrollbar">
-                        {recentLogins.length === 0 ? (
-                            <p className="p-6 text-sm text-slate-400 text-center">No logins yet</p>
+                        {recentActivity.length === 0 ? (
+                            <EmptyState icon={<Activity size={32} className="opacity-30" />} message="No scans recorded yet" />
                         ) : (
-                            recentLogins.map((log, i) => (
-                                <div key={i} className="px-5 py-3.5 hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors">
+                            recentActivity.map((act, i) => (
+                                <div key={i} className="px-6 py-3.5 hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors flex items-center justify-between">
                                     <div className="flex items-center gap-3">
-                                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 text-slate-500 dark:text-slate-300 flex items-center justify-center font-bold text-xs shrink-0 border border-slate-200 dark:border-slate-600">
-                                            {log.name.substring(0, 2).toUpperCase()}
+                                        <div className={`w-2 h-2 rounded-full ${getStatusDot(act.display_status || act.status)}`}></div>
+                                        <div>
+                                            <p className="text-sm font-bold text-slate-800 dark:text-white">{act.patient_name}</p>
+                                            <p className="text-[10px] text-slate-500 dark:text-slate-400">by Dr. {act.doctor_name} · <span className="font-mono">{act.patient_tag}</span></p>
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{log.name}</p>
-                                            <p className="text-[10px] text-slate-400 mt-0.5">{formatDateTime(log.last_login)}</p>
-                                        </div>
-                                        <div className="flex flex-col items-end gap-1">
-                                            <span className={`w-2 h-2 rounded-full ${log.is_active ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-300 dark:bg-slate-600'}`}></span>
-                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{log.is_active ? 'Online' : 'Offline'}</span>
-                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold border ${getStatusBadge(act.display_status || act.status)}`}>{act.display_status || act.status}</span>
+                                        <p className="text-[10px] text-slate-400 mt-1">{act.created_at}</p>
                                     </div>
                                 </div>
                             ))
+                        )}
+                    </div>
+                </div>
+
+                {/* 🔴🔴 Live Doctor Activity */}
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col h-[600px]">
+                    <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0 flex items-center justify-between">
+                        <div>
+                            <h3 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                                <Wifi size={16} className="text-emerald-500 animate-pulse" />
+                                Live Doctor Activity
+                            </h3>
+                            <p className="text-[10px] text-slate-400 mt-0.5">Real-time login/logout monitoring</p>
+                        </div>
+                        <button
+                            onClick={() => navigate('/admin/doctor-activity')}
+                            className="text-[10px] font-bold text-blue-500 hover:text-blue-600 flex items-center gap-1"
+                        >
+                            View All <ArrowUpRight size={10} />
+                        </button>
+                    </div>
+                    <div className="divide-y divide-slate-50 dark:divide-slate-800/50 overflow-y-auto flex-1 custom-scrollbar">
+                        {liveActivity.length === 0 ? (
+                            <p className="p-6 text-sm text-slate-400 text-center">No activity yet</p>
+                        ) : (
+                            liveActivity.map((evt, i) => {
+                                const isLogin = evt.event_type === 'login';
+                                const isOnline = evt.is_online;
+
+                                return (
+                                    <div key={i} className="px-5 py-3 hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors">
+                                        <div className="flex items-center gap-3">
+                                            {/* Avatar مع مؤشر online/offline */}
+                                            <div className="relative shrink-0">
+                                                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 text-slate-500 dark:text-slate-300 flex items-center justify-center font-bold text-xs border border-slate-200 dark:border-slate-600">
+                                                    {evt.name.substring(0, 2).toUpperCase()}
+                                                </div>
+                                                {/* 🔴🔴 نقطة خضراء (online) أو حمراء (offline) */}
+                                                <span
+                                                    className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${isOnline
+                                                            ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
+                                                            : 'bg-rose-500'
+                                                        }`}
+                                                ></span>
+                                            </div>
+
+                                            {/* اسم الدكتور + نوع الحدث */}
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5">
+                                                    {evt.name}
+                                                    {isLogin ? (
+                                                        <LogIn size={11} className="text-emerald-500 shrink-0" />
+                                                    ) : (
+                                                        <LogOut size={11} className="text-rose-400 shrink-0" />
+                                                    )}
+                                                </p>
+                                                <p className="text-[10px] text-slate-400 mt-0.5">
+                                                    {isLogin ? 'Logged in' : 'Logged out'} · {formatDateTime(evt.timestamp)}
+                                                </p>
+                                            </div>
+
+                                            {/* حالة online/offline */}
+                                            <div className="flex flex-col items-end gap-1 shrink-0">
+                                                <span className={`text-[9px] font-bold uppercase tracking-tight ${isOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'
+                                                    }`}>
+                                                    {isOnline ? 'Online' : 'Offline'}
+                                                </span>
+                                                <span className={`text-[8px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded ${isLogin
+                                                        ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                                        : 'bg-rose-50 dark:bg-rose-500/10 text-rose-500 dark:text-rose-400'
+                                                    }`}>
+                                                    {isLogin ? 'IN' : 'OUT'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })
                         )}
                     </div>
                 </div>

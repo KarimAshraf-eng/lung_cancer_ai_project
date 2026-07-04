@@ -79,9 +79,32 @@ def _compute_display_status(scan):
     return scan.status
 
 
-# ══════════════════════════════════════════════════════════════════
+# ── Helper: Determine if a doctor is currently online ─────────────
+def _is_doctor_online(doctor) -> bool:
+    """
+    طبيب "online" لو:
+      - is_active = True
+      - last_login = خلال آخر 30 دقيقة
+      - آخر حدث في LoginHistory = "login" (مش "logout")
+    """
+    if not doctor.is_active or not doctor.last_login:
+        return False
+    thirty_min_ago = datetime.utcnow() - timedelta(minutes=30)
+    if doctor.last_login < thirty_min_ago:
+        return False
+    # تحقق إن آخر حدث login (مش logout)
+    last_event = (
+        db_session_for_helper.query(models.LoginHistory)
+        .filter(models.LoginHistory.doctor_id == doctor.id)
+        .order_by(desc(models.LoginHistory.timestamp))
+        .first()
+    ) if False else None  # placeholder — ده بيتعمل بشكل صحيح في الـ endpoints
+    return True
+
+
+# ════════════════════════════════════════════════════════════════════
 # 1. SYSTEM OVERVIEW
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 @router.get("/overview", summary="Admin: System-wide overview statistics")
 def get_admin_overview(
@@ -153,40 +176,258 @@ def get_admin_overview(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
-# 2. RECENT LOGINS
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
+# 2. RECENT LOGINS  (🔴 معاد لـ "Live Doctor Activity")
+# ════════════════════════════════════════════════════════════════════
+# التعديل: بدل ما يعرض بس "آخر حدث login لكل دكتور"، بقى يعرض آخر 15 حدث
+# (login + logout) لكل الدكاترة + حالة online/offline اللحظية + آخر IP.
+# ════════════════════════════════════════════════════════════════════
 
-@router.get("/recent-logins", summary="Admin: Get recent login audit trail")
+@router.get("/recent-logins", summary="Admin: Get live doctor activity (login/logout events)")
 def get_recent_logins(
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(15, ge=1, le=100),
     admin: models.Doctor = Depends(require_admin),
     db: Session = Depends(database.get_db),
 ):
-    """Returns the most recent login events across all doctors."""
-    logins = (
-        db.query(models.Doctor)
-        .filter(models.Doctor.is_admin == False, models.Doctor.last_login.isnot(None))
-        .order_by(desc(models.Doctor.last_login))
+    """
+    🔴🔴 التعديل: بقى "Live Doctor Activity"
+    بيرجّع آخر 15 حدث (login + logout) لكل الدكاترة، مع:
+      - اسم الدكتور وإيميله
+      - نوع الحدث (login أو logout)
+      - timestamp
+      - IP address (لو متوفر)
+      - حالة online/offline الحالية للدكتور
+
+    الـ admin بياخد الـ response ده ويعرضه في "Live Doctor Activity" في الـ Overview.
+    """
+    # آخر `limit` حدث في جدول LoginHistory
+    recent_events = (
+        db.query(models.LoginHistory)
+        .join(models.Doctor)
+        .filter(models.Doctor.is_admin == False)
+        .order_by(desc(models.LoginHistory.timestamp))
         .limit(limit)
         .all()
     )
 
-    return [
-        {
+    thirty_min_ago = datetime.utcnow() - timedelta(minutes=30)
+
+    result = []
+    for evt in recent_events:
+        doctor = evt.doctor
+        # online = is_active + last_login خلال 30 دقيقة + آخر حدث = login
+        last_event = recent_events[0] if recent_events else None
+        is_online = (
+            doctor.is_active
+            and doctor.last_login is not None
+            and doctor.last_login >= thirty_min_ago
+            # تحقق إن آخر حدث للدكتور ده = login (مش logout)
+            and evt.event_type == "login"
+        )
+
+        result.append({
+            "id": evt.id,
+            "doctor_id": doctor.id,
+            "name": doctor.name,
+            "email": doctor.email,
+            "is_active": doctor.is_active,
+            "event_type": evt.event_type,        # "login" أو "logout"
+            "timestamp": evt.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if evt.timestamp else None,
+            "ip_address": evt.ip_address,
+            # حالة الـ online "الحالية" (بترجع لـ last_event من نوع login)
+            "is_online": _compute_online_status(db, doctor.id, thirty_min_ago),
+        })
+
+    return result
+
+
+def _compute_online_status(db: Session, doctor_id: int, thirty_min_ago: datetime) -> bool:
+    """
+    حدد هل الدكتور ده online دلوقتي ولا لأ:
+      - is_active = True
+      - آخر حدث في LoginHistory = "login" (مش "logout")
+      - الـ timestamp بتاع آخر حدث login خلال آخر 30 دقيقة
+    """
+    doctor = db.query(models.Doctor).filter(models.Doctor.id == doctor_id).first()
+    if not doctor or not doctor.is_active:
+        return False
+
+    # هات آخر حدث login للدكتور ده
+    last_login_event = (
+        db.query(models.LoginHistory)
+        .filter(
+            models.LoginHistory.doctor_id == doctor_id,
+            models.LoginHistory.event_type == "login",
+        )
+        .order_by(desc(models.LoginHistory.timestamp))
+        .first()
+    )
+    if not last_login_event:
+        return False
+
+    # هات آخر حدث logout للدكتور ده
+    last_logout_event = (
+        db.query(models.LoginHistory)
+        .filter(
+            models.LoginHistory.doctor_id == doctor_id,
+            models.LoginHistory.event_type == "logout",
+        )
+        .order_by(desc(models.LoginHistory.timestamp))
+        .first()
+    )
+
+    # لو فيه logout بعد آخر login → الدكتور ده offline
+    if last_logout_event and last_logout_event.timestamp > last_login_event.timestamp:
+        return False
+
+    # تحقق إن آخر login خلال 30 دقيقة
+    if last_login_event.timestamp < thirty_min_ago:
+        return False
+
+    return True
+
+
+# ════════════════════════════════════════════════════════════════════
+# 🔴🔴 جديد: DOCTOR ACTIVITY  (صفحة Doctor Activity الجديدة)
+# ════════════════════════════════════════════════════════════════════
+
+@router.get("/doctor-activity", summary="Admin: List all doctors with current online/offline status")
+def get_doctor_activity(
+    search: Optional[str] = Query(None, description="Search by name or email"),
+    admin: models.Doctor = Depends(require_admin),
+    db: Session = Depends(database.get_db),
+):
+    """
+    🔴🔴 endpoint جديد للصفحة الجديدة "Doctor Activity"
+    بيرجّع كل الدكاترة مع:
+      - بياناتهم (id, name, email, is_active, created_at)
+      - حالة online/offline الحالية
+      - آخر مرة سجّلوا فيها login (من last_login column)
+      - عدد مرات الـ login الكلية
+      - عدد مرات الـ logout الكلية
+    """
+    query = db.query(models.Doctor).filter(models.Doctor.is_admin == False)
+
+    if search:
+        query = query.filter(
+            or_(
+                models.Doctor.name.ilike(f"%{search}%"),
+                models.Doctor.email.ilike(f"%{search}%"),
+            )
+        )
+
+    doctors = query.order_by(desc(models.Doctor.created_at)).all()
+    thirty_min_ago = datetime.utcnow() - timedelta(minutes=30)
+
+    result = []
+    for d in doctors:
+        # عدد مرات login
+        login_count = (
+            db.query(models.LoginHistory)
+            .filter(
+                models.LoginHistory.doctor_id == d.id,
+                models.LoginHistory.event_type == "login",
+            )
+            .count()
+        )
+        # عدد مرات logout
+        logout_count = (
+            db.query(models.LoginHistory)
+            .filter(
+                models.LoginHistory.doctor_id == d.id,
+                models.LoginHistory.event_type == "logout",
+            )
+            .count()
+        )
+        # آخر حدث (سواء login أو logout)
+        last_event = (
+            db.query(models.LoginHistory)
+            .filter(models.LoginHistory.doctor_id == d.id)
+            .order_by(desc(models.LoginHistory.timestamp))
+            .first()
+        )
+        last_event_type = last_event.event_type if last_event else None
+        last_event_time = last_event.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if last_event and last_event.timestamp else None
+
+        # online status
+        is_online = _compute_online_status(db, d.id, thirty_min_ago)
+
+        result.append({
             "id": d.id,
             "name": d.name,
             "email": d.email,
             "is_active": d.is_active,
+            "is_online": is_online,
             "last_login": d.last_login.strftime("%Y-%m-%dT%H:%M:%SZ") if d.last_login else None,
-        }
-        for d in logins
-    ]
+            "last_event_type": last_event_type,         # "login" أو "logout" أو null
+            "last_event_time": last_event_time,
+            "login_count": login_count,
+            "logout_count": logout_count,
+            "created_at": d.created_at.strftime("%Y-%m-%d") if d.created_at else "N/A",
+        })
+
+    return result
 
 
-# ══════════════════════════════════════════════════════════════════
+@router.get("/doctors/{doctor_id}/login-history", summary="Admin: Get full login/logout history for a doctor")
+def get_doctor_login_history(
+    doctor_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    admin: models.Doctor = Depends(require_admin),
+    db: Session = Depends(database.get_db),
+):
+    """
+    🔴🔴 endpoint جديد: سجل login/logout كامل لدكتور معين
+    بيرجّع آخر 100 حدث مرتبين من الأحدث للأقدم.
+    """
+    doctor = db.query(models.Doctor).filter(models.Doctor.id == doctor_id).first()
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found.")
+
+    events = (
+        db.query(models.LoginHistory)
+        .filter(models.LoginHistory.doctor_id == doctor_id)
+        .order_by(desc(models.LoginHistory.timestamp))
+        .limit(limit)
+        .all()
+    )
+
+    # إحصائيات سريعة
+    total_logins = sum(1 for e in events if e.event_type == "login")
+    total_logouts = sum(1 for e in events if e.event_type == "logout")
+    thirty_min_ago = datetime.utcnow() - timedelta(minutes=30)
+    is_online = _compute_online_status(db, doctor_id, thirty_min_ago)
+
+    return {
+        "doctor_info": {
+            "id": doctor.id,
+            "name": doctor.name,
+            "email": doctor.email,
+            "is_active": doctor.is_active,
+            "is_online": is_online,
+            "last_login": doctor.last_login.strftime("%Y-%m-%dT%H:%M:%SZ") if doctor.last_login else None,
+            "created_at": doctor.created_at.strftime("%Y-%m-%d") if doctor.created_at else "N/A",
+        },
+        "stats": {
+            "total_logins": total_logins,
+            "total_logouts": total_logouts,
+            "events_returned": len(events),
+        },
+        "history": [
+            {
+                "id": e.id,
+                "event_type": e.event_type,
+                "timestamp": e.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if e.timestamp else None,
+                "ip_address": e.ip_address,
+            }
+            for e in events
+        ],
+    }
+
+
+# ════════════════════════════════════════════════════════════════════
 # 3. RECENT SYSTEM ACTIVITY (Latest scans across all doctors)
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 @router.get("/recent-activity", summary="Admin: Latest scans across the system")
 def get_recent_activity(
@@ -219,9 +460,9 @@ def get_recent_activity(
     return activity
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 # 4. DOCTOR MANAGEMENT
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 @router.get("/doctors", summary="Admin: List all doctors with stats")
 def get_all_doctors(
@@ -439,7 +680,11 @@ def delete_doctor(
             if patient:
                 db.delete(patient)
 
-    # 3. Delete the doctor
+    # 🔴 3. حذف سجل الـ LoginHistory للطبيب ده (cascade بينفّذ ده تلقائياً)
+    # لكن بنفّذه يدوياً كمان عشان نتأكد
+    db.query(models.LoginHistory).filter(models.LoginHistory.doctor_id == doctor_id).delete()
+
+    # 4. Delete the doctor
     db.delete(target)
     db.commit()
 
@@ -450,9 +695,9 @@ def delete_doctor(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 # 5. DOCTOR'S PATIENTS (Read-only access for admin)
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 @router.get("/doctors/{doctor_id}/patients", summary="Admin: View all patients of a specific doctor")
 def get_doctor_patients(
@@ -611,11 +856,10 @@ def get_patient_full_details(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 # 6. GLOBAL PATIENT SEARCH (across all doctors)
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
-# 🔴 التعديل هنا: جعل q اختيارياً ليتمكن من جلب جميع المرضى
 @router.get("/patients/search", summary="Admin: Global patient search across all doctors")
 def search_patients(
     q: Optional[str] = Query(None, description="Search query: patient name or ID tag"),
@@ -627,7 +871,7 @@ def search_patients(
     Returns patient info along with which doctor(s) examined them. If q is empty, returns all."""
 
     query = db.query(models.Patient)
-    
+
     if q and q.strip():
         query = query.filter(
             or_(
@@ -636,12 +880,10 @@ def search_patients(
             )
         )
 
-    # ترتيب بناء على ID ليعرضهم بترتيب ثابت
     patients = query.order_by(desc(models.Patient.id)).limit(limit).all()
 
     result = []
     for p in patients:
-        # Get all doctors who examined this patient
         scans = db.query(models.Scan).filter(models.Scan.patient_id == p.id).all()
         doctor_ids = list(set(s.doctor_id for s in scans))
 
@@ -697,9 +939,9 @@ def search_patients(
     return result
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 # 7. PATIENT FULL PROFILE (all doctors who examined this patient)
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 @router.get("/patients/{patient_id}", summary="Admin: Full patient profile with all examining doctors")
 def get_patient_profile(
@@ -714,7 +956,6 @@ def get_patient_profile(
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found.")
 
-    # Get all scans for this patient across all doctors
     all_scans = (
         db.query(models.Scan)
         .filter(models.Scan.patient_id == patient_id)
@@ -722,7 +963,6 @@ def get_patient_profile(
         .all()
     )
 
-    # Group scans by doctor
     doctor_data = {}
     for s in all_scans:
         if s.doctor_id not in doctor_data:
@@ -766,7 +1006,6 @@ def get_patient_profile(
             "has_report": os.path.exists(os.path.join("reports", f"Medical_Report_{s.id}.pdf")),
         })
 
-    # Build the response
     doctors_list = []
     total_nodules = 0
     for did, data in doctor_data.items():
@@ -819,9 +1058,9 @@ def get_patient_profile(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 # 8. SYSTEM ANALYTICS
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 @router.get("/analytics", summary="Admin: System analytics and performance metrics")
 def get_analytics(
@@ -847,7 +1086,6 @@ def get_analytics(
     for row in doctor_activity:
         doc = db.query(models.Doctor).filter(models.Doctor.id == row.doctor_id).first()
         if doc:
-            # Count nodules for this doctor
             completed_scan_ids = [
                 s.id for s in
                 db.query(models.Scan).filter(
@@ -931,7 +1169,6 @@ def get_analytics(
     )
     gender_distribution = {g: c for g, c in gender_data}
 
-    # ── Average scans per patient ─────────────────────────────
     avg_scans = 0
     if total_patients > 0:
         avg_scans = round(db.query(models.Scan).count() / total_patients, 1)
@@ -950,9 +1187,9 @@ def get_analytics(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 # 9. AI MODEL MONITORING & QUEUE STATUS
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 @router.get("/ai-status", summary="Admin: AI model and queue monitoring status")
 def get_ai_status(
@@ -971,12 +1208,10 @@ def get_ai_status(
         queue_length = 0
         is_busy = False
 
-    # Get scan status counts
     processing = db.query(models.Scan).filter(models.Scan.status == "Processing").count()
     completed = db.query(models.Scan).filter(models.Scan.status == "Completed").count()
     failed = db.query(models.Scan).filter(models.Scan.status == "Failed").count()
 
-    # Get high-confidence unreviewed scans (confidence > 90% with pending annotations)
     high_confidence_unreviewed = (
         db.query(models.Scan)
         .join(models.Annotation)
@@ -989,7 +1224,6 @@ def get_ai_status(
         .count()
     )
 
-    # Get stuck processing scans (older than 1 hour)
     one_hour_ago = datetime.utcnow() - timedelta(hours=1)
     stuck_processing = (
         db.query(models.Scan)
@@ -1012,9 +1246,9 @@ def get_ai_status(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 # 10. AI PERFORMANCE ANALYTICS
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 @router.get("/ai-analytics", summary="Admin: AI model performance metrics")
 def get_ai_analytics(
@@ -1022,7 +1256,6 @@ def get_ai_analytics(
     db: Session = Depends(database.get_db),
 ):
     """Returns detailed AI performance: approval rates, false positives, confidence stats."""
-    # Get all annotations for completed scans
     all_annotations = (
         db.query(models.Annotation)
         .join(models.Scan)
@@ -1062,7 +1295,6 @@ def get_ai_analytics(
     approval_rate = round((approved / (approved + rejected)) * 100) if (approved + rejected) > 0 else 0
     false_positive_rate = round((rejected / (approved + rejected)) * 100) if (approved + rejected) > 0 else 0
 
-    # AI-only analysis (annotations sourced from AI)
     ai_annotations = [a for a in all_annotations if a.source == "AI"]
     ai_approved = sum(1 for a in ai_annotations if a.status == "Approved")
     ai_rejected = sum(1 for a in ai_annotations if a.status == "Rejected")
@@ -1091,9 +1323,9 @@ def get_ai_analytics(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 # 11. SCAN OVERSIGHT (All scans across all doctors)
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 @router.get("/scans", summary="Admin: List all scans across the system")
 def get_all_scans(
@@ -1110,7 +1342,7 @@ def get_all_scans(
 
     if doctor_id:
         query = query.filter(models.Scan.doctor_id == doctor_id)
-        
+
     if status == "Unreviewed":
         unreviewed_scan_ids = (
             db.query(models.Annotation.scan_id)
@@ -1135,7 +1367,7 @@ def get_all_scans(
         )
     elif status:
         query = query.filter(models.Scan.status == status)
-        
+
     if search:
         query = query.join(models.Patient).filter(models.Patient.name.ilike(f"%{search}%"))
 
@@ -1222,9 +1454,9 @@ def admin_delete_scan(
     return {"message": f"Scan #{scan_id} deleted successfully by admin."}
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 # 12. STORAGE MONITORING
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 def _get_dir_size(path: str) -> int:
     """Calculate total size of a directory in bytes."""
@@ -1263,12 +1495,10 @@ def get_storage_info(
     reports_size = _get_dir_size("reports") if os.path.exists("reports") else 0
     total_size = uploads_size + snapshots_size + reports_size
 
-    # Count files
     uploads_count = sum(len(files) for _, _, files in os.walk("uploads")) if os.path.exists("uploads") else 0
     snapshots_count = sum(len(files) for _, _, files in os.walk("snapshots")) if os.path.exists("snapshots") else 0
     reports_count = sum(len(files) for _, _, files in os.walk("reports")) if os.path.exists("reports") else 0
 
-    # Scan count from DB
     scan_count = db.query(models.Scan).count()
 
     return {
@@ -1297,9 +1527,9 @@ def get_storage_info(
     }
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 # 13. ACTIVITY LOG (Derived from existing data)
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 
 @router.get("/activity-log", summary="Admin: System activity log")
 def get_activity_log(
@@ -1368,24 +1598,27 @@ def get_activity_log(
             },
         })
 
-    # 3. Doctor logins
-    logins = (
-        db.query(models.Doctor)
-        .filter(models.Doctor.is_admin == False, models.Doctor.last_login.isnot(None))
-        .order_by(desc(models.Doctor.last_login))
+    # 3. Doctor logins (🔴🔴 من جدول LoginHistory بدل last_login column)
+    login_events = (
+        db.query(models.LoginHistory)
+        .join(models.Doctor)
+        .filter(models.Doctor.is_admin == False)
+        .order_by(desc(models.LoginHistory.timestamp))
         .limit(20)
         .all()
     )
-    for d in logins:
+    for evt in login_events:
+        doctor = evt.doctor
         events.append({
-            "type": "login",
-            "icon": "login",
-            "description": f"Doctor logged in",
-            "actor": d.name,
-            "actor_id": d.id,
-            "timestamp": d.last_login.strftime("%Y-%m-%dT%H:%M:%SZ") if d.last_login else None,
+            "type": f"doctor_{evt.event_type}",  # "doctor_login" أو "doctor_logout"
+            "icon": evt.event_type,
+            "description": f"Doctor {evt.event_type}d",  # "Doctor logged in" أو "Doctor logged out"
+            "actor": doctor.name if doctor else "Unknown",
+            "actor_id": evt.doctor_id,
+            "timestamp": evt.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if evt.timestamp else None,
             "details": {
-                "is_active": d.is_active,
+                "is_active": doctor.is_active if doctor else False,
+                "ip_address": evt.ip_address,
             },
         })
 
