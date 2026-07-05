@@ -302,7 +302,8 @@ def process_single_scan(scan_id: str):
         model = get_ai_model()
 
         lung_mask = segment_lung_mask(raw_scan)
-        scan_norm = (processed_scan - (-1000)) / (400 - (-1000))  # [0, 1]
+        scan_norm = (processed_scan - (-1000)) / (400 - (-1000)) 
+        scan_norm = (scan_norm * 2) - 1 
 
         crop_size = 48
         step = 10
