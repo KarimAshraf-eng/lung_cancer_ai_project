@@ -26,6 +26,13 @@ def get_patient_payload(scan):
         "family_history": scan.patient.family_history, "doctor_notes": scan.patient.doctor_notes
     }
 
+# ════════════════════════════════════════════════════════════════════
+# 🔴🔴🔴 التعديل: حذف الكاش (التحقق من وجود ملف قديم)
+# ════════════════════════════════════════════════════════════════════
+# المشكلة: كان بيتحقق لو الـ PDF موجود، ولو موجود بيرجعه على طول.
+# النتيجة: الطبيب لما يعدل بيانات المريض ويعمل Save، الـ PDF بيفضل قديم.
+# الحل: دايماً اعمل generate للـ PDF جديد قبل ما ترجعه.
+# ════════════════════════════════════════════════════════════════════
 @router.get("/{scan_id}/download-pdf")
 def download_report(scan_id: str, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(database.get_db)):
     scan = db.query(models.Scan).filter(models.Scan.id == scan_id).first()
@@ -38,7 +45,9 @@ def download_report(scan_id: str, current_doctor: models.Doctor = Depends(get_cu
     download_filename = f"Report_{safe_patient_name.replace(' ', '_')}.pdf"
     pdf_path = os.path.join(REPORTS_DIR, f"Medical_Report_{scan_id}.pdf")
     
+    # 🔴🔴🔴 دايماً اعمل generate للـ PDF جديد
     create_pdf_report(scan_id=scan.id, scan_date=scan.created_at, doctor_name=current_doctor.name, patient=patient_data, annotations=annotations, snapshots_dir=SNAPSHOTS_DIR, output_path=pdf_path)
+    
     if not os.path.exists(pdf_path): raise HTTPException(500, "Error")
     return FileResponse(path=pdf_path, filename=download_filename, media_type='application/pdf', headers={"Access-Control-Expose-Headers": "Content-Disposition"})
 
@@ -54,8 +63,9 @@ def get_pdf_data(scan_id: str, current_doctor: models.Doctor = Depends(get_curre
     download_filename = f"Report_{safe_patient_name.replace(' ', '_')}.pdf"
     pdf_path = os.path.join(REPORTS_DIR, f"Medical_Report_{scan_id}.pdf")
 
-    if not os.path.exists(pdf_path):
-        create_pdf_report(scan_id=scan.id, scan_date=scan.created_at, doctor_name=current_doctor.name, patient=patient_data, annotations=annotations, snapshots_dir=SNAPSHOTS_DIR, output_path=pdf_path)
+    # 🔴🔴🔴 دايماً اعمل generate للـ PDF جديد
+    create_pdf_report(scan_id=scan.id, scan_date=scan.created_at, doctor_name=current_doctor.name, patient=patient_data, annotations=annotations, snapshots_dir=SNAPSHOTS_DIR, output_path=pdf_path)
+    
     if not os.path.exists(pdf_path): raise HTTPException(500, "Error")
 
     with open(pdf_path, "rb") as pdf_file:

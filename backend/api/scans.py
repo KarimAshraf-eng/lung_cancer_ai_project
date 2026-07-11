@@ -300,19 +300,26 @@ def get_progress(scan_id: str, db: Session = Depends(database.get_db)):
     if not scan: return {"progress": 0, "total_slices": 0, "status": "Unknown"}
     return {"progress": scan.progress, "total_slices": scan.total_slices, "status": scan.status}
 
-# 🔴🔴 فلتر الـ "Rejected" من نتائج الـ ScanViewer والـ Reports
+# 🔴🔴 التعديل: إضافة parameter لتحديد هل نجيب الـ Rejected ولا لأ
+# ScanViewer هيستدعيها عادي (include_rejected=False) → مفيش Rejected
+# Reports هتبعت include_rejected=true → تجيب كل الأورام حتى الـ Rejected
 @router.get("/{scan_id}/results")
-def get_scan_results(scan_id: str, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(database.get_db)):
+def get_scan_results(scan_id: str, include_rejected: bool = Query(False, description="Include rejected annotations"), current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(database.get_db)):
     scan = db.query(models.Scan).filter(models.Scan.id == scan_id).first()
     if not scan or (scan.doctor_id != current_doctor.id and not current_doctor.is_admin): raise HTTPException(404, "Not found.")
 
     slices_dir = os.path.join("snapshots", f"scan_{scan_id}_slices")
     total_slices = len(os.listdir(slices_dir)) if os.path.exists(slices_dir) else scan.total_slices
 
-    annotations = db.query(models.Annotation).filter(
-        models.Annotation.scan_id == scan_id,
-        models.Annotation.status != "Rejected"
-    ).all()
+    if include_rejected:
+        annotations = db.query(models.Annotation).filter(
+            models.Annotation.scan_id == scan_id
+        ).all()
+    else:
+        annotations = db.query(models.Annotation).filter(
+            models.Annotation.scan_id == scan_id,
+            models.Annotation.status != "Rejected"
+        ).all()
 
     return {
         "scan_id": scan.id, "status": scan.status, "total_slices": total_slices,

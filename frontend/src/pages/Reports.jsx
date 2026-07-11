@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useCallback, memo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Search, Activity, Eye, Filter, Check, Download, Save, ArrowLeft, Trash2, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -7,6 +7,40 @@ import { ScanProcessingContext } from '../context/ScanProcessingContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+
+// ════════════════════════════════════════════════════════════════════
+// 🔴🔴🔴 التعديل: إخراج SymptomBlock بره الـ Main Component
+// ════════════════════════════════════════════════════════════════════
+// المشكلة: كان جوه الـ Reports component، فكل ما الـ state يتغير،
+// كان بيتعمله re-create من جديد، فالـ input كان بيفقد الـ focus.
+// الحل: إخراجه بره الـ component كـ memoized component مستقل.
+// ════════════════════════════════════════════════════════════════════
+const SymptomBlock = memo(({ label, checkName, detailName, checked, detailValue, onChange, isRose }) => (
+    <div className={`p-4 rounded-xl border transition-colors ${checked ? (isRose ? 'border-rose-200 bg-rose-50/50 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-blue-200 bg-blue-50/50 dark:border-blue-500/30 dark:bg-blue-500/10') : 'border-slate-100 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/50'}`}>
+        <label className="flex items-center gap-2 cursor-pointer mb-1">
+            <input
+                type="checkbox"
+                name={checkName}
+                checked={checked || false}
+                onChange={onChange}
+                className={`w-5 h-5 rounded dark:bg-slate-700 dark:border-slate-600 ${isRose ? 'text-rose-500' : 'text-blue-600'}`}
+            />
+            <span className={`font-bold text-sm ${isRose ? 'text-rose-600 dark:text-rose-400' : 'text-slate-700 dark:text-slate-300'}`}>{label}</span>
+        </label>
+        {checked && (
+            <div className="mt-3 animate-fade-in-up">
+                <input
+                    type="text"
+                    name={detailName}
+                    value={detailValue || ''}
+                    onChange={onChange}
+                    placeholder={`Type details for ${label.toLowerCase()}...`}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg outline-none bg-white dark:bg-slate-900 dark:text-white transition-colors"
+                />
+            </div>
+        )}
+    </div>
+));
 
 export default function Reports() {
     const navigate = useNavigate();
@@ -86,7 +120,8 @@ export default function Reports() {
     const fetchDetails = async (id) => {
         setLoadingDetails(true);
         try {
-            const response = await api.get(`/scans/${id}/results`);
+            // 🔴🔴 التعديل: بنبعت include_rejected=true عشان نجيب كل الأورام (حتى الـ Rejected)
+            const response = await api.get(`/scans/${id}/results?include_rejected=true`);
             setScanData(response.data);
             if (response.data.status === 'Completed') {
                 setPatientData(response.data.patient_details);
@@ -99,10 +134,11 @@ export default function Reports() {
         }
     };
 
-    const handlePatientChange = (e) => {
+    // 🔴🔴🔴 استخدام useCallback عشان نمنع الـ re-renders الغير ضرورية
+    const handlePatientChange = useCallback((e) => {
         const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-        setPatientData({ ...patientData, [e.target.name]: value });
-    };
+        setPatientData(prev => ({ ...prev, [e.target.name]: value }));
+    }, []);
 
     const toggleNoduleStatus = (id, newStatus) => {
         setAnnotations(prev => prev.map(ann => ann.id === id ? { ...ann, status: newStatus } : ann));
@@ -116,21 +152,21 @@ export default function Reports() {
                 name: patientData.name || '',
                 age: Number(patientData.age) || 0,
                 gender: patientData.gender || 'Male',
-                has_previous_tumors: !!patientData.has_previous_tumors,
+                has_previous_tumors: patientData.has_previous_tumors || false,
                 prev_tumors_details: patientData.prev_tumors_details || null,
-                chest_pain_complaint: !!patientData.chest_pain_complaint,
-                chest_pain_details: patientData.chest_pain_details || null,
-                chronic_cough: !!patientData.chronic_cough,
-                chronic_cough_details: patientData.chronic_cough_details || null,
-                coughing_blood: !!patientData.coughing_blood,
-                coughing_blood_details: patientData.coughing_blood_details || null,
-                weight_loss: !!patientData.weight_loss,
-                weight_loss_details: patientData.weight_loss_details || null,
-                occupational_exposure: !!patientData.occupational_exposure,
+                occupational_exposure: patientData.occupational_exposure || false,
                 occ_exposure_details: patientData.occ_exposure_details || null,
+                chest_pain_complaint: patientData.chest_pain_complaint || false,
+                chest_pain_details: patientData.chest_pain_details || null,
+                chronic_cough: patientData.chronic_cough || false,
+                chronic_cough_details: patientData.chronic_cough_details || null,
+                coughing_blood: patientData.coughing_blood || false,
+                coughing_blood_details: patientData.coughing_blood_details || null,
+                weight_loss: patientData.weight_loss || false,
+                weight_loss_details: patientData.weight_loss_details || null,
                 previous_chest_diseases: patientData.previous_chest_diseases || null,
-                is_smoker: !!patientData.is_smoker,
-                pack_years: Number(patientData.pack_years) || 0,
+                is_smoker: patientData.is_smoker || false,
+                pack_years: patientData.pack_years ? Number(patientData.pack_years) : 0,
                 smoking_cessation_date: patientData.smoking_cessation_date || null,
                 family_history: patientData.family_history || null,
                 doctor_notes: patientData.doctor_notes || null
@@ -138,16 +174,20 @@ export default function Reports() {
 
             await api.put(`/scans/${selectedScanId}/patient`, safePayload);
 
-            for (const ann of annotations) {
-                if (ann.status === 'Rejected') {
-                    await api.delete(`/scans/${selectedScanId}/annotations/${ann.id}`);
-                } else if (ann.status === 'Approved') {
-                    await api.put(`/scans/${selectedScanId}/annotations/${ann.id}`, { status: 'Approved' });
-                }
-            }
+            const updatePromises = annotations.map(ann =>
+                api.put(`/scans/${selectedScanId}/annotations/${ann.id}`, {
+                    status: ann.status,
+                    coord_x: ann.coord_x,
+                    coord_y: ann.coord_y,
+                    start_slice: ann.start_slice,
+                    end_slice: ann.end_slice
+                })
+            );
+            await Promise.all(updatePromises);
 
             toast.success("All changes saved successfully!", { id: saveToast });
-            await fetchDetails(selectedScanId);
+            // 🔴🔴🔴 التعديل: نشيل fetchDetails عشان الـ Rejected يفضل ظاهر في الـ UI
+            // الـ state المحلي فيه بالفعل الـ status الجديد (Rejected/Approved)
         } catch (err) {
             console.error("Save Error:", err.response?.data);
             toast.error("An error occurred while saving.", { id: saveToast });
@@ -159,7 +199,8 @@ export default function Reports() {
     const handleDownloadPDF = async () => {
         const downloadToast = toast.loading('Generating PDF...');
         try {
-            const response = await api.get(`/reports/${selectedScanId}/get-pdf-data`);
+            // 🔴🔴🔴 التعديل: إضافة timestamp عشان نتجنب الـ browser caching
+            const response = await api.get(`/reports/${selectedScanId}/get-pdf-data?t=${Date.now()}`);
             const { filename, pdf_base64 } = response.data;
 
             const link = document.createElement('a');
@@ -208,22 +249,11 @@ export default function Reports() {
             }
         } catch (err) {
             toast.error("Failed to delete scan.", { id: deleteToast });
+        } finally {
+            setDeleteDialog(false);
+            setDeleteTargetId(null);
         }
     };
-
-    const SymptomBlock = ({ label, checkName, detailName, isRose }) => (
-        <div className={`p-4 rounded-xl border transition-colors ${patientData[checkName] ? (isRose ? 'border-rose-200 bg-rose-50/50 dark:border-rose-500/30 dark:bg-rose-500/10' : 'border-blue-200 bg-blue-50/50 dark:border-blue-500/30 dark:bg-blue-500/10') : 'border-slate-100 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/50'}`}>
-            <label className="flex items-center gap-2 cursor-pointer mb-1">
-                <input type="checkbox" name={checkName} checked={patientData[checkName] || false} onChange={handlePatientChange} className={`w-5 h-5 rounded dark:bg-slate-700 dark:border-slate-600 ${isRose ? 'text-rose-500' : 'text-blue-600'}`} />
-                <span className={`font-bold text-sm ${isRose ? 'text-rose-600 dark:text-rose-400' : 'text-slate-700 dark:text-slate-300'}`}>{label}</span>
-            </label>
-            {patientData[checkName] && (
-                <div className="mt-3 animate-fade-in-up">
-                    <input type="text" name={detailName} value={patientData[detailName] || ''} onChange={handlePatientChange} placeholder={`Type details for ${label.toLowerCase()}...`} className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg outline-none bg-white dark:bg-slate-900 dark:text-white transition-colors" />
-                </div>
-            )}
-        </div>
-    );
 
     const getStatusColor = (derivedStatus) => {
         if (derivedStatus === 'Needs Review') return 'bg-orange-100 text-orange-700 dark:bg-orange-500/10 dark:text-orange-400 border border-orange-200 dark:border-orange-500/20';
@@ -238,20 +268,10 @@ export default function Reports() {
     if (view === 'list') {
         return (
             <div className="max-w-7xl mx-auto space-y-8 animate-fade-in-up">
-                <ConfirmDialog
-                    isOpen={deleteDialog}
-                    onClose={() => setDeleteDialog(false)}
-                    onConfirm={handleDeleteScan}
-                    title="Delete This Scan?"
-                    message="This action is permanent and cannot be undone. All scan data, AI annotations, and the generated report will be permanently deleted."
-                    confirmText="Yes, Delete"
-                    confirmColor="rose"
-                />
-
                 <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
                     <div>
-                        <h2 className="text-3xl font-extrabold text-slate-800 dark:text-white tracking-tight transition-colors">Patient Records</h2>
-                        <p className="text-slate-500 dark:text-slate-400 mt-1 transition-colors">Search, filter, and manage AI diagnostic reports.</p>
+                        <h2 className="text-3xl font-extrabold text-slate-800 dark:text-white tracking-tight">Reports & History</h2>
+                        <p className="text-slate-500 dark:text-slate-400 mt-1">Review patient scans, verify AI findings, and generate PDF reports.</p>
                     </div>
                 </div>
 
@@ -280,7 +300,7 @@ export default function Reports() {
                 <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col transition-colors">
                     <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
                         <h3 className="text-lg font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                            <Activity size={20} className="text-blue-500" /> Recent Scans
+                            <Activity size={20} className="text-blue-500" /> Scans History
                             <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 py-0.5 px-2.5 rounded-full text-xs ml-2">{totalItems} Total</span>
                         </h3>
                     </div>
@@ -292,14 +312,17 @@ export default function Reports() {
                             </div>
                         ) : historyList.length === 0 ? (
                             <div className="p-12 text-center text-slate-500 dark:text-slate-400 h-full flex flex-col justify-center">
+                                <div className="bg-slate-100 dark:bg-slate-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <Search size={24} className="text-slate-400 dark:text-slate-500" />
+                                </div>
                                 <p className="font-medium text-lg">No records found.</p>
                             </div>
                         ) : (
                             <table className="w-full text-left border-collapse">
                                 <thead>
                                     <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 text-sm border-b border-slate-100 dark:border-slate-800">
-                                        <th className="px-6 py-4 font-semibold text-center">ID</th>
                                         <th className="px-6 py-4 font-semibold text-center">Patient Name</th>
+                                        <th className="px-6 py-4 font-semibold text-center">Patient ID</th>
                                         <th className="px-6 py-4 font-semibold text-center">Upload Date</th>
                                         <th className="px-6 py-4 font-semibold text-center">Status</th>
                                         <th className="px-6 py-4 font-semibold text-center">Action</th>
@@ -309,10 +332,10 @@ export default function Reports() {
                                     {historyList.map((item) => (
                                         <tr key={item.scan_id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/80 transition-colors group">
                                             <td className="px-6 py-4 text-center">
-                                                <span className="font-mono text-sm text-slate-600 dark:text-slate-300">{item.patient_tag || 'N/A'}</span>
+                                                <p className="font-bold text-slate-800 dark:text-slate-200">{item.patient_name}</p>
                                             </td>
                                             <td className="px-6 py-4 text-center">
-                                                <p className="font-bold text-slate-800 dark:text-slate-200">{item.patient_name}</p>
+                                                <span className="font-mono text-sm text-slate-600 dark:text-slate-300">{item.patient_tag || 'N/A'}</span>
                                             </td>
                                             <td className="px-6 py-4 text-center text-sm text-slate-500 dark:text-slate-400 font-medium">{item.upload_date}</td>
                                             <td className="px-6 py-4 text-center">
@@ -322,10 +345,10 @@ export default function Reports() {
                                             </td>
                                             <td className="px-6 py-4 text-center">
                                                 <div className="flex items-center justify-center gap-2">
-                                                    <button onClick={() => handleOpenReport(item.scan_id)} className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl hover:bg-blue-600 hover:text-white dark:hover:bg-blue-600 dark:hover:text-white font-bold text-sm transition-all duration-300 shadow-sm">
-                                                        <Eye size={16} /> Open Report
+                                                    <button onClick={() => handleOpenReport(item.scan_id)} className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-slate-900 dark:bg-blue-600 text-white rounded-xl hover:bg-slate-800 dark:hover:bg-blue-500 font-bold text-sm transition-all duration-300 shadow-md">
+                                                        <Eye size={16} /> View Report
                                                     </button>
-                                                    <button onClick={(e) => openDeleteDialog(item.scan_id, e)} className="inline-flex items-center justify-center p-2 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-xl hover:bg-rose-600 hover:text-white dark:hover:bg-rose-600 dark:hover:text-white font-bold text-sm transition-all duration-300 shadow-sm" title="Delete Scan">
+                                                    <button onClick={(e) => openDeleteDialog(item.scan_id, e)} className="inline-flex items-center justify-center p-2.5 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-xl hover:bg-rose-600 hover:text-white font-bold text-sm transition-all duration-300" title="Delete Scan">
                                                         <Trash2 size={16} />
                                                     </button>
                                                 </div>
@@ -349,6 +372,16 @@ export default function Reports() {
                         </div>
                     )}
                 </div>
+
+                <ConfirmDialog
+                    isOpen={deleteDialog}
+                    onClose={() => setDeleteDialog(false)}
+                    onConfirm={handleDeleteScan}
+                    title="Delete Scan?"
+                    message="Are you sure you want to permanently delete this scan? This will remove all associated data including the PDF report and AI nodules."
+                    confirmText="Yes, Delete"
+                    confirmColor="rose"
+                />
             </div>
         );
     }
@@ -356,133 +389,111 @@ export default function Reports() {
     // ==========================================
     // 2. DETAILS VIEW
     // ==========================================
-    if (loadingDetails) return <div className="p-10 text-center animate-pulse font-bold text-slate-500 dark:text-slate-400">Loading Report Details...</div>;
+    if (loadingDetails) {
+        return <div className="h-full flex items-center justify-center"><div className="w-12 h-12 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>;
+    }
 
-    if (scanData?.status === "Processing") return (
-        <div className="max-w-6xl mx-auto space-y-6">
-            <button onClick={handleBackToList} className="flex items-center gap-2 text-slate-500 dark:text-slate-400 hover:text-blue-600 font-bold transition-colors">
-                <ArrowLeft size={20} /> Back to List
-            </button>
-            <div className="p-10 text-center bg-amber-50 dark:bg-amber-500/10 rounded-2xl border border-amber-200 dark:border-amber-500/20">
-                <h2 className="text-xl font-bold text-amber-700 dark:text-amber-500">Scan is still processing...</h2>
-            </div>
-        </div>
-    );
-
-    return (
-        <div className="max-w-6xl mx-auto space-y-8 animate-fade-in-up pb-10">
-            <ConfirmDialog
-                isOpen={reanalyzeDialog}
-                onClose={() => setReanalyzeDialog(false)}
-                onConfirm={handleReanalyze}
-                title="Re-run AI Analysis"
-                message="This will permanently delete all AI-detected nodules from this scan and run a fresh analysis using the current AI model. Doctor-added nodules will be preserved."
-                confirmText="Yes, Re-analyze"
-                confirmColor="amber"
-                icon={<RefreshCw size={32} className="text-amber-500" />}
-            />
-
-            <ConfirmDialog
-                isOpen={deleteDialog}
-                onClose={() => setDeleteDialog(false)}
-                onConfirm={handleDeleteScan}
-                title="Delete This Scan?"
-                message="This action is permanent and cannot be undone. All scan data, AI annotations, and the generated report will be permanently deleted."
-                confirmText="Yes, Delete"
-                confirmColor="rose"
-            />
-
-            <div className="flex justify-between items-center">
-                <button onClick={handleBackToList} className="flex items-center gap-2 text-slate-500 dark:text-slate-400 hover:text-blue-600 font-bold transition-colors bg-white dark:bg-slate-800 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+    if (!scanData || scanData.status !== 'Completed') {
+        return (
+            <div className="max-w-4xl mx-auto space-y-6 animate-fade-in-up">
+                <button onClick={handleBackToList} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-bold transition-colors">
                     <ArrowLeft size={20} /> Back to List
                 </button>
-                <button onClick={() => { setDeleteTargetId(selectedScanId); setDeleteDialog(true); }} className="bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-900/20 dark:border-rose-800 dark:text-rose-400 px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-rose-600 hover:text-white dark:hover:bg-rose-600 dark:hover:text-white font-bold transition-all">
-                    <Trash2 size={20} /> Delete Scan
-                </button>
+                <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-2xl p-8 text-center">
+                    <p className="text-amber-600 dark:text-amber-400 font-bold">This scan is not ready for review yet. Status: {scanData?.status || 'Unknown'}</p>
+                </div>
             </div>
+        );
+    }
 
-            <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 p-8 transition-colors">
-                <h3 className="text-xl font-extrabold text-slate-800 dark:text-slate-200 border-b border-slate-100 dark:border-slate-800 pb-4 mb-6">Patient Information & Medical History</h3>
+    return (
+        <div className="max-w-5xl mx-auto space-y-6 animate-fade-in-up pb-10">
+            <button onClick={handleBackToList} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-bold transition-colors bg-white dark:bg-slate-800 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md">
+                <ArrowLeft size={16} /> Back to List
+            </button>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm">
+                <h3 className="text-xl font-extrabold text-slate-800 dark:text-white mb-6 flex items-center gap-2">
+                    <Activity size={24} className="text-blue-500" /> Patient Details & Clinical History
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                     <div><label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-1">Full Name</label><input type="text" name="name" value={patientData.name || ''} onChange={handlePatientChange} className="w-full px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 dark:bg-slate-800 dark:text-white font-medium" /></div>
                     <div><label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-1">Age</label><input type="number" name="age" value={patientData.age || ''} onChange={handlePatientChange} className="w-full px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 dark:bg-slate-800 dark:text-white font-medium" /></div>
-                    <div><label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-1">Gender</label><select name="gender" value={patientData.gender || ''} onChange={handlePatientChange} className="w-full px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 dark:bg-slate-800 dark:text-white font-medium"><option value="Male">Male</option><option value="Female">Female</option></select></div>
+                    <div><label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-1">Gender</label><select name="gender" value={patientData.gender || 'Male'} onChange={handlePatientChange} className="w-full px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 dark:bg-slate-800 dark:text-white font-medium cursor-pointer"><option value="Male">Male</option><option value="Female">Female</option></select></div>
+                    <div><label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-1">Hospital ID</label><input type="text" value={patientData.tag || 'N/A'} disabled className="w-full px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl outline-none bg-slate-100 dark:bg-slate-800/50 text-slate-500 font-medium cursor-not-allowed" /></div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className={`p-5 rounded-2xl border transition-colors ${patientData.is_smoker ? 'border-amber-200 bg-amber-50/50 dark:border-amber-500/30 dark:bg-amber-500/10' : 'border-slate-100 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/50'}`}>
-                        <label className="flex items-center gap-3 cursor-pointer mb-4">
-                            <input type="checkbox" name="is_smoker" checked={patientData.is_smoker || false} onChange={handlePatientChange} className="w-5 h-5 text-amber-600 rounded border-slate-300 dark:border-slate-600 dark:bg-slate-700" />
-                            <span className="font-bold text-slate-800 dark:text-white">Smoker</span>
-                        </label>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Pack-years</label>
-                                <input type="number" name="pack_years" value={patientData.pack_years || ''} onChange={handlePatientChange} disabled={!patientData.is_smoker} className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm outline-none bg-white dark:bg-slate-900 dark:text-white disabled:opacity-50" />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Quit Date</label>
-                                <input type="date" name="smoking_cessation_date" value={patientData.smoking_cessation_date || ''} onChange={handlePatientChange} disabled={!patientData.is_smoker} className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm outline-none bg-white dark:bg-slate-900 dark:text-white disabled:opacity-50" />
-                            </div>
+                <div className="p-5 rounded-2xl border border-amber-200 dark:border-amber-500/30 bg-amber-50/50 dark:bg-amber-500/5 mb-6">
+                    <label className="flex items-center gap-3 cursor-pointer mb-3">
+                        <input type="checkbox" name="is_smoker" checked={patientData.is_smoker || false} onChange={handlePatientChange} className="w-5 h-5 text-amber-600 rounded border-slate-300 dark:border-slate-600 dark:bg-slate-700" />
+                        <span className="font-bold text-amber-600 dark:text-amber-400">Smoker</span>
+                    </label>
+                    {patientData.is_smoker && (
+                        <div className="grid grid-cols-2 gap-4 mt-3 animate-fade-in-up">
+                            <div><label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Pack-years</label><input type="number" name="pack_years" value={patientData.pack_years || ''} onChange={handlePatientChange} className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm outline-none bg-white dark:bg-slate-900 dark:text-white" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">Quit Date</label><input type="date" name="smoking_cessation_date" value={patientData.smoking_cessation_date || ''} onChange={handlePatientChange} className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm outline-none bg-white dark:bg-slate-900 dark:text-white" /></div>
                         </div>
-                    </div>
+                    )}
+                </div>
 
-                    <div className="grid grid-cols-1 gap-3">
-                        <SymptomBlock label="Prev. Tumors" checkName="has_previous_tumors" detailName="prev_tumors_details" />
-                        <SymptomBlock label="Occ. Exposure" checkName="occupational_exposure" detailName="occ_exposure_details" />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <SymptomBlock label="Prev. Tumors" checkName="has_previous_tumors" detailName="prev_tumors_details" checked={patientData.has_previous_tumors} detailValue={patientData.prev_tumors_details} onChange={handlePatientChange} isRose />
+                    <SymptomBlock label="Occ. Exposure" checkName="occupational_exposure" detailName="occ_exposure_details" checked={patientData.occupational_exposure} detailValue={patientData.occ_exposure_details} onChange={handlePatientChange} />
+                    <SymptomBlock label="Chest Pain" checkName="chest_pain_complaint" detailName="chest_pain_details" checked={patientData.chest_pain_complaint} detailValue={patientData.chest_pain_details} onChange={handlePatientChange} />
+                    <SymptomBlock label="Chronic Cough" checkName="chronic_cough" detailName="chronic_cough_details" checked={patientData.chronic_cough} detailValue={patientData.chronic_cough_details} onChange={handlePatientChange} />
+                    <SymptomBlock label="Hemoptysis" checkName="coughing_blood" detailName="coughing_blood_details" checked={patientData.coughing_blood} detailValue={patientData.coughing_blood_details} onChange={handlePatientChange} isRose />
+                    <SymptomBlock label="Weight Loss" checkName="weight_loss" detailName="weight_loss_details" checked={patientData.weight_loss} detailValue={patientData.weight_loss_details} onChange={handlePatientChange} />
+                </div>
 
-                    <SymptomBlock label="Chest Pain" checkName="chest_pain_complaint" detailName="chest_pain_details" />
-                    <SymptomBlock label="Chronic Cough" checkName="chronic_cough" detailName="chronic_cough_details" />
-                    <SymptomBlock label="Hemoptysis" checkName="coughing_blood" detailName="coughing_blood_details" isRose />
-                    <SymptomBlock label="Weight Loss" checkName="weight_loss" detailName="weight_loss_details" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div><label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-1">Previous Chest Diseases</label><input type="text" name="previous_chest_diseases" value={patientData.previous_chest_diseases || ''} onChange={handlePatientChange} className="w-full px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl outline-none bg-slate-50 dark:bg-slate-800 dark:text-white" /></div>
+                    <div><label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-1">Family History</label><input type="text" name="family_history" value={patientData.family_history || ''} onChange={handlePatientChange} className="w-full px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl outline-none bg-slate-50 dark:bg-slate-800 dark:text-white" /></div>
+                </div>
 
-                    <div className="col-span-1 md:col-span-2 mt-2">
-                        <label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-1">Previous Chest Diseases</label>
-                        <input type="text" name="previous_chest_diseases" value={patientData.previous_chest_diseases || ''} onChange={handlePatientChange} className="w-full px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl outline-none bg-slate-50 dark:bg-slate-800 dark:text-white" />
-                    </div>
-
-                    <div className="col-span-1 md:col-span-2">
-                        <label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-2">Final Radiological Impression (Doctor Note)</label>
-                        <textarea name="doctor_notes" rows="4" value={patientData.doctor_notes || ''} onChange={handlePatientChange} className="w-full px-4 py-3 border border-slate-200 dark:border-slate-700 rounded-xl outline-none bg-slate-50 dark:bg-slate-800 dark:text-white leading-relaxed"></textarea>
-                    </div>
+                <div>
+                    <label className="block text-sm font-bold text-slate-600 dark:text-slate-400 mb-1">Doctor Notes (Final Impression)</label>
+                    <textarea name="doctor_notes" value={patientData.doctor_notes || ''} onChange={handlePatientChange} rows="4" className="w-full px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl outline-none bg-slate-50 dark:bg-slate-800 dark:text-white resize-none" placeholder="Enter final radiological impression..."></textarea>
                 </div>
             </div>
 
-            <div>
-                <h3 className="text-2xl font-extrabold text-slate-800 dark:text-white mb-6 flex items-center gap-2 transition-colors">
-                    Radiological Findings
-                    <span className="bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm py-1 px-3 rounded-full">{annotations.length} Nodules</span>
+            {/* Nodules Review Section */}
+            <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm">
+                <h3 className="text-xl font-extrabold text-slate-800 dark:text-white mb-6 flex items-center gap-2">
+                    <Check size={24} className="text-blue-500" /> AI Findings Review ({annotations.length})
                 </h3>
 
                 {annotations.length === 0 ? (
-                    <div className="p-10 text-center bg-slate-50 dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 font-bold text-slate-400">
-                        No nodules detected or all rejected nodules were deleted.
-                    </div>
+                    <div className="text-center py-8 text-slate-500">No nodules detected or remaining.</div>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {annotations.map((ann, index) => (
-                            <div key={ann.id} className={`bg-white dark:bg-slate-900 rounded-3xl shadow-sm border overflow-hidden transition-all duration-300 ${ann.status === 'Rejected' ? 'opacity-60 border-rose-200 dark:border-rose-900 scale-95' : 'border-slate-100 dark:border-slate-800 hover:shadow-xl dark:hover:border-slate-700'}`}>
-                                <div className="h-56 bg-slate-900 flex items-center justify-center relative">
-                                    <img src={`${BACKEND_URL}/snapshots/scan_${selectedScanId}_nodule_${ann.id}.png?t=${new Date().getTime()}`} alt={`Nodule ${ann.id}`} className="h-full object-contain" onError={(e) => { e.target.style.display = 'none'; }} />
-                                    <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md text-white text-xs font-bold px-3 py-1.5 rounded-full">Slice: {ann.slice_number}</div>
-                                    {ann.status === 'Rejected' && <div className="absolute inset-0 bg-rose-500/20 flex items-center justify-center"><Trash2 size={48} className="text-white drop-shadow-md opacity-50" /></div>}
+                    <div className="space-y-4">
+                        {annotations.map((ann, idx) => (
+                            <div key={ann.id} className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-start gap-4 transition-colors ${ann.status === 'Approved' ? 'border-emerald-200 bg-emerald-50/50 dark:border-emerald-500/30 dark:bg-emerald-500/5' : ann.status === 'Rejected' ? 'border-rose-200 bg-rose-50/50 dark:border-rose-500/30 dark:bg-rose-500/5 opacity-60' : 'border-amber-200 bg-amber-50/50 dark:border-amber-500/30 dark:bg-amber-500/5'}`}>
+                                {/* 🔴🔴🔴 صورة الورم (snapshot) */}
+                                <div className="shrink-0">
+                                    <img
+                                        src={`${BACKEND_URL}/snapshots/scan_${selectedScanId}_nodule_${ann.id}.png`}
+                                        alt={`Nodule ${idx + 1}`}
+                                        className="w-24 h-24 rounded-xl object-cover border border-slate-200 dark:border-slate-700"
+                                        onError={(e) => { e.target.style.display = 'none'; }}
+                                    />
                                 </div>
-                                <div className="p-6">
-                                    <div className="flex justify-between items-center mb-4">
-                                        <span className="font-extrabold text-lg text-slate-800 dark:text-slate-200">Nodule #{index + 1}</span>
-                                        <span className={`text-xs font-extrabold px-3 py-1.5 rounded-full uppercase tracking-wider ${ann.status === 'Approved' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400' : ann.status === 'Rejected' ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'}`}>{ann.status}</span>
-                                    </div>
-                                    <div className="space-y-2 mb-6">
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-slate-500 dark:text-slate-400 font-medium">AI Confidence</span>
-                                            <span className="font-extrabold text-blue-600 dark:text-blue-400">{(ann.confidence * 100).toFixed(1)}%</span>
+                                <div className="flex-1 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                    <div className="flex items-center gap-4">
+                                        <span className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 font-bold text-slate-600 dark:text-slate-300 shrink-0">{idx + 1}</span>
+                                        <div>
+                                            <p className="font-bold text-slate-800 dark:text-white">Slice: {ann.slice_number}</p>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                                                Confidence: {Math.round((ann.confidence || 0) * 100)}% | Diameter: {ann.diameter?.toFixed(1)} mm
+                                            </p>
+                                            <p className={`text-xs font-bold mt-1 ${ann.status === 'Approved' ? 'text-emerald-600' : ann.status === 'Rejected' ? 'text-rose-500' : 'text-amber-500'}`}>
+                                                Status: {ann.status}
+                                            </p>
                                         </div>
                                     </div>
-                                    <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
-                                        <button onClick={() => toggleNoduleStatus(ann.id, 'Approved')} className={`flex-1 py-3 rounded-xl flex justify-center items-center gap-2 text-sm font-bold transition-all ${ann.status === 'Approved' ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30' : 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400'}`}><Check size={18} /> Approve</button>
-                                        <button onClick={() => toggleNoduleStatus(ann.id, 'Rejected')} className={`flex-1 py-3 rounded-xl flex justify-center items-center gap-2 text-sm font-bold transition-all ${ann.status === 'Rejected' ? 'bg-rose-500 text-white shadow-md shadow-rose-500/30' : 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400'}`}><Trash2 size={18} /> Reject</button>
+                                    <div className="flex gap-2 shrink-0">
+                                        <button onClick={() => toggleNoduleStatus(ann.id, 'Approved')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${ann.status === 'Approved' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/10'}`}>Approve</button>
+                                        <button onClick={() => toggleNoduleStatus(ann.id, 'Rejected')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${ann.status === 'Rejected' ? 'bg-rose-600 text-white shadow-md' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-rose-100 dark:hover:bg-rose-500/10'}`}>Reject</button>
                                     </div>
                                 </div>
                             </div>
@@ -491,17 +502,28 @@ export default function Reports() {
                 )}
             </div>
 
-            <div className="flex flex-wrap justify-end gap-4 mt-12 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <button onClick={handleSaveAll} disabled={saving} className="bg-blue-600 text-white px-8 py-3 rounded-xl flex items-center gap-2 hover:bg-blue-700 font-bold shadow-md shadow-blue-500/20 disabled:bg-slate-400 transition-all text-lg">
-                    <Save size={22} /> {saving ? 'Saving...' : 'Save All Changes'}
+            {/* Actions */}
+            <div className="flex flex-col sm:flex-row gap-3 justify-end">
+                <button onClick={() => setReanalyzeDialog(true)} className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-amber-600 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors">
+                    <RefreshCw size={18} /> Re-analyze Scan
                 </button>
-                <button onClick={handleDownloadPDF} className="bg-emerald-500 text-white px-8 py-3 rounded-xl flex items-center gap-2 hover:bg-emerald-600 font-bold shadow-md shadow-emerald-500/20 transition-all text-lg">
-                    <Download size={22} /> Download PDF
+                <button onClick={handleSaveAll} disabled={saving} className="flex items-center justify-center gap-2 px-8 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg shadow-blue-500/25 disabled:opacity-50 transition-all">
+                    {saving ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <Save size={18} />} Save All Changes
                 </button>
-                <button onClick={() => setReanalyzeDialog(true)} className="bg-amber-500 text-white px-8 py-3 rounded-xl flex items-center gap-2 hover:bg-amber-600 font-bold shadow-md shadow-amber-500/20 transition-all text-lg">
-                    <RefreshCw size={22} /> Re-analyze with AI
+                <button onClick={handleDownloadPDF} className="flex items-center justify-center gap-2 px-8 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 shadow-lg shadow-emerald-500/25 transition-all">
+                    <Download size={18} /> Download PDF
                 </button>
             </div>
+
+            <ConfirmDialog
+                isOpen={reanalyzeDialog}
+                onClose={() => setReanalyzeDialog(false)}
+                onConfirm={handleReanalyze}
+                title="Re-analyze Scan?"
+                message="This will delete all current AI annotations and run the AI model again. This process takes time."
+                confirmText="Yes, Re-analyze"
+                confirmColor="amber"
+            />
         </div>
     );
 }
